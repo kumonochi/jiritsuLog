@@ -51,7 +51,198 @@ class JiritsuLogApp {
             this.debugDOMElements();
             // Google API初期化（遅延実行）
             this.waitForGoogleApiAndInit();
+            // 新しいメインGoogle連携も初期化
+            this.initMainGoogleAuth();
         }, 100);
+    }
+    
+    // メインGoogle認証セクションの初期化
+    initMainGoogleAuth() {
+        console.log('=== メインGoogle認証初期化開始 ===');
+        
+        // 保存されたユーザー情報を復元
+        const savedUser = localStorage.getItem('googleUser');
+        if (savedUser) {
+            try {
+                this.currentUser = JSON.parse(savedUser);
+                this.isSignedIn = true;
+                console.log('保存されたGoogle認証情報を復元しました:', this.currentUser);
+            } catch (error) {
+                console.error('保存されたユーザー情報の復元に失敗:', error);
+                localStorage.removeItem('googleUser');
+            }
+        }
+        
+        // 3秒後に初期化（DOM要素とGoogle APIの準備完了を待つ）
+        setTimeout(() => {
+            this.setupMainGoogleSignin();
+            
+            // ユーザー情報が既にある場合はUIを更新
+            if (this.currentUser && this.isSignedIn) {
+                setTimeout(() => {
+                    this.updateMainUserInfo(this.currentUser);
+                }, 1000);
+            }
+        }, 3000);
+    }
+    
+    // メインGoogle連携ボタンのセットアップ
+    setupMainGoogleSignin() {
+        console.log('=== メインGoogle連携ボタンセットアップ ===');
+        
+        const mainButton = document.getElementById('main-google-signin-button');
+        const manualButton = document.getElementById('manual-google-signin');
+        
+        if (!mainButton) {
+            console.log('メインGoogle連携ボタン要素が見つかりません');
+            return;
+        }
+        
+        console.log('メインGoogle連携ボタン要素確認:', mainButton);
+        
+        // Google APIが利用可能かチェック
+        if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+            try {
+                console.log('Google Identity Services利用可能 - メインボタンをレンダリング');
+                
+                // Google Identity Services初期化
+                google.accounts.id.initialize({
+                    client_id: this.GOOGLE_CLIENT_ID,
+                    callback: this.handleMainCredentialResponse.bind(this),
+                    auto_select: false,
+                    cancel_on_tap_outside: true
+                });
+                
+                // メインボタンをレンダリング
+                google.accounts.id.renderButton(mainButton, {
+                    theme: 'filled_white',
+                    size: 'medium',
+                    text: 'signin',
+                    locale: 'ja',
+                    width: '200'
+                });
+                
+                console.log('✅ メインGoogleボタンのレンダリング完了');
+                
+            } catch (error) {
+                console.error('メインGoogleボタンレンダリングエラー:', error);
+                this.showManualButton();
+            }
+        } else {
+            console.log('Google Identity Services未利用可能 - 手動ボタンを表示');
+            this.showManualButton();
+        }
+        
+        // 5秒後にフォールバック確認
+        setTimeout(() => {
+            if (mainButton.innerHTML.trim() === '' && manualButton) {
+                console.log('メインボタンが空のため手動ボタンを表示');
+                this.showManualButton();
+            }
+        }, 5000);
+    }
+    
+    // 手動ボタンを表示
+    showManualButton() {
+        const manualButton = document.getElementById('manual-google-signin');
+        if (manualButton) {
+            manualButton.style.display = 'inline-block';
+            console.log('手動Googleサインインボタンを表示しました');
+        }
+    }
+    
+    // メイン認証レスポンス処理
+    handleMainCredentialResponse(response) {
+        console.log('=== メイン認証レスポンス受信 ===');
+        console.log('認証レスポンス:', response);
+        
+        try {
+            // JWTトークンをデコード
+            const payload = JSON.parse(atob(response.credential.split('.')[1]));
+            console.log('ユーザー情報:', payload);
+            
+            // ユーザー情報を保存
+            this.currentUser = {
+                name: payload.name,
+                email: payload.email,
+                picture: payload.picture,
+                sub: payload.sub
+            };
+            
+            // UIを更新
+            this.updateMainUserInfo(this.currentUser);
+            
+            // ログイン状態を保存
+            this.isSignedIn = true;
+            localStorage.setItem('googleUser', JSON.stringify(this.currentUser));
+            
+            this.showPopupNotification('✅ Googleアカウントでログインしました', 'success');
+            
+        } catch (error) {
+            console.error('認証レスポンス処理エラー:', error);
+            this.showPopupNotification('❌ ログイン処理でエラーが発生しました', 'error');
+        }
+    }
+    
+    // メインユーザー情報UIの更新
+    updateMainUserInfo(user) {
+        const signinSection = document.getElementById('main-google-signin-section');
+        const userInfoSection = document.getElementById('main-google-user-info');
+        const userPicture = document.getElementById('main-user-picture');
+        const userName = document.getElementById('main-user-name');
+        
+        if (signinSection && userInfoSection && userPicture && userName) {
+            // サインインセクションを非表示
+            signinSection.style.display = 'none';
+            
+            // ユーザー情報を表示
+            userInfoSection.style.display = 'block';
+            userPicture.src = user.picture || '';
+            userName.textContent = user.name || user.email || 'ユーザー';
+            
+            console.log('メインユーザー情報UIを更新しました');
+        }
+    }
+    
+    // 手動Googleサインイン処理
+    handleManualGoogleSignin() {
+        console.log('手動Googleサインインが実行されました');
+        
+        // 設定確認
+        this.checkGoogleApiConfiguration();
+        
+        // OAuth2フローを開始
+        this.requestAccessToken();
+    }
+    
+    // Googleサインアウト処理
+    handleGoogleSignout() {
+        console.log('Googleサインアウト実行');
+        
+        // Google Identity Servicesサインアウト
+        if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+            google.accounts.id.disableAutoSelect();
+        }
+        
+        // 状態をリセット
+        this.isSignedIn = false;
+        this.currentUser = null;
+        this.accessToken = null;
+        
+        // ローカルストレージをクリア
+        localStorage.removeItem('googleUser');
+        localStorage.removeItem('googleAccessToken');
+        
+        // UIを更新
+        const signinSection = document.getElementById('main-google-signin-section');
+        const userInfoSection = document.getElementById('main-google-user-info');
+        
+        if (signinSection && userInfoSection) {
+            signinSection.style.display = 'block';
+            userInfoSection.style.display = 'none';
+        }
+        
+        this.showPopupNotification('✅ ログアウトしました', 'success');
     }
     
     // デバッグ用DOM要素確認
