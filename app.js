@@ -15,6 +15,7 @@ class JiritsuLogApp {
         this.isGoogleApiLoaded = false;
         this.isSignedIn = false;
         this.currentUser = null;
+        this.accessToken = null; // アクセストークンを保存
         this.GOOGLE_CLIENT_ID = '47690741133-c4pbiefj90me73dflkla5q3ie67nbqdl.apps.googleusercontent.com'; // 後で設定が必要
         this.DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
         this.SCOPES = 'https://www.googleapis.com/auth/drive.file';
@@ -2800,6 +2801,20 @@ class JiritsuLogApp {
                 await gapi.client.init({
                     discoveryDocs: [this.DISCOVERY_DOC],
                 });
+                
+                // OAuth 2.0も初期化
+                try {
+                    await gapi.load('auth2', () => {
+                        gapi.auth2.init({
+                            client_id: this.GOOGLE_CLIENT_ID,
+                            scope: this.SCOPES
+                        });
+                    });
+                    console.log('OAuth 2.0初期化完了');
+                } catch (authError) {
+                    console.warn('OAuth 2.0初期化に失敗:', authError);
+                }
+                
                 this.isGoogleApiLoaded = true;
                 console.log('Google API初期化完了');
             }
@@ -2891,12 +2906,114 @@ class JiritsuLogApp {
             this.updateAuthUI();
             this.showPopupNotification('Googleアカウントでログインしました', 'success');
             
-            // サインイン後にデータを同期
-            await this.syncDataWithGoogle();
+            // OAuth 2.0のアクセストークンを取得するために追加の認証が必要
+            await this.requestAccessToken();
             
         } catch (error) {
             console.error('認証エラー:', error);
             this.showPopupNotification('ログインに失敗しました', 'warning');
+        }
+    }
+    
+    // OAuth 2.0アクセストークンを取得
+    async requestAccessToken() {
+        try {
+            // 最初に従来のgapi.auth2を試行
+            if (typeof gapi !== 'undefined' && gapi.auth2) {
+                const authInstance = gapi.auth2.getAuthInstance();
+                if (authInstance) {
+                    try {
+                        // 既にサインインしている場合
+                        const authUser = authInstance.currentUser.get();
+                        if (authUser && authUser.isSignedIn()) {
+                            const authResponse = authUser.getAuthResponse();
+                            if (authResponse && authResponse.access_token) {
+                                this.accessToken = authResponse.access_token;
+                                console.log('既存のアクセストークン取得成功');
+                                await this.syncDataWithGoogle();
+                                return;
+                            }
+                        }
+                        
+                        // サインインしていない場合は新規サインイン
+                        const authUser2 = await authInstance.signIn({
+                            scope: this.SCOPES
+                        });
+                        
+                        if (authUser2) {
+                            const authResponse = authUser2.getAuthResponse();
+                            this.accessToken = authResponse.access_token;
+                            console.log('新規サインインでアクセストークン取得成功');
+                            await this.syncDataWithGoogle();
+                            return;
+                        }
+                    } catch (auth2Error) {
+                        console.warn('auth2認証に失敗:', auth2Error);
+                    }
+                }
+            }
+            
+            // gapi.auth2が利用できない場合、直接OAuth 2.0フローを使用
+            await this.initOAuth2Flow();
+            
+        } catch (error) {
+            console.error('アクセストークン取得エラー:', error);
+            this.showPopupNotification('Google Driveへのアクセス権限が必要です。認証画面で許可してください。', 'warning');
+        }
+    }
+    
+    // OAuth 2.0フローを初期化
+    async initOAuth2Flow() {
+        try {
+            // Google OAuth 2.0エンドポイントを使用
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                `client_id=${this.GOOGLE_CLIENT_ID}&` +
+                `redirect_uri=${encodeURIComponent(window.location.origin + window.location.pathname)}&` +
+                `response_type=token&` +
+                `scope=${encodeURIComponent(this.SCOPES)}&` +
+                `include_granted_scopes=true&` +
+                `state=sync_request`;
+            
+            // ポップアップでOAuth認証を行う
+            const popup = window.open(authUrl, 'oauth', 'width=500,height=600');
+            
+            // URLハッシュを監視してアクセストークンを取得
+            const checkForToken = () => {
+                try {
+                    if (popup.closed) {
+                        clearInterval(checkInterval);
+                        return;
+                    }
+                    
+                    const hash = popup.location.hash;
+                    if (hash && hash.includes('access_token=')) {
+                        const params = new URLSearchParams(hash.substring(1));
+                        this.accessToken = params.get('access_token');
+                        popup.close();
+                        clearInterval(checkInterval);
+                        
+                        if (this.accessToken) {
+                            console.log('OAuth2アクセストークン取得成功');
+                            this.syncDataWithGoogle();
+                        }
+                    }
+                } catch (e) {
+                    // クロスオリジンエラーは無視
+                }
+            };
+            
+            const checkInterval = setInterval(checkForToken, 1000);
+            
+            // 2分後にタイムアウト
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                if (!popup.closed) {
+                    popup.close();
+                }
+            }, 120000);
+            
+        } catch (error) {
+            console.error('OAuth2フロー初期化エラー:', error);
         }
     }
     
@@ -2926,8 +3043,14 @@ class JiritsuLogApp {
         });
         
         // 手動同期ボタン
-        document.getElementById('manual-sync').addEventListener('click', () => {
-            this.syncDataWithGoogle();
+        document.getElementById('manual-sync').addEventListener('click', async () => {
+            if (!this.accessToken) {
+                // アクセストークンがない場合は認証フローを開始
+                await this.requestAccessToken();
+            } else {
+                // アクセストークンがある場合は直接同期
+                this.syncDataWithGoogle();
+            }
         });
     }
     
@@ -2937,21 +3060,40 @@ class JiritsuLogApp {
             google.accounts.id.disableAutoSelect();
         }
         
+        // 従来のauth2からもサインアウト
+        if (typeof gapi !== 'undefined' && gapi.auth2) {
+            const authInstance = gapi.auth2.getAuthInstance();
+            if (authInstance) {
+                authInstance.signOut();
+            }
+        }
+        
         this.isSignedIn = false;
         this.currentUser = null;
+        this.accessToken = null; // アクセストークンもクリア
         this.updateAuthUI();
         this.showPopupNotification('ログアウトしました', 'info');
     }
     
     // Googleドライブとのデータ同期
     async syncDataWithGoogle() {
-        if (!this.isSignedIn || !this.isGoogleApiLoaded) {
+        if (!this.isSignedIn) {
             this.showPopupNotification('Googleアカウントにログインしてください', 'warning');
             return;
         }
         
+        // アクセストークンがない場合は取得を試行
+        if (!this.accessToken) {
+            this.showPopupNotification('Google Driveへのアクセス権限が必要です', 'warning');
+            await this.requestAccessToken();
+            return;
+        }
+        
         try {
-            document.getElementById('sync-status').textContent = '同期中...';
+            const syncStatusElement = document.getElementById('sync-status');
+            if (syncStatusElement) {
+                syncStatusElement.textContent = '同期中...';
+            }
             
             // データをJSONとして準備
             const dataToSync = {
@@ -2976,21 +3118,36 @@ class JiritsuLogApp {
             const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
                 method: 'POST',
                 headers: new Headers({
-                    'Authorization': `Bearer ${gapi.auth2.getAuthInstance().currentUser.get().getAuthResponse().access_token}`
+                    'Authorization': `Bearer ${this.accessToken}`
                 }),
                 body: form
             });
             
             if (response.ok) {
-                document.getElementById('sync-status').textContent = '同期済み';
+                if (syncStatusElement) {
+                    syncStatusElement.textContent = '同期済み';
+                }
                 this.showPopupNotification('データをクラウドに保存しました', 'success');
             } else {
-                throw new Error('同期に失敗しました');
+                const errorText = await response.text();
+                console.error('同期レスポンスエラー:', errorText);
+                
+                // アクセストークンが無効な場合は再取得を試行
+                if (response.status === 401) {
+                    this.accessToken = null;
+                    this.showPopupNotification('認証が期限切れです。再度認証してください', 'warning');
+                    await this.requestAccessToken();
+                } else {
+                    throw new Error(`同期に失敗しました (${response.status})`);
+                }
             }
             
         } catch (error) {
             console.error('同期エラー:', error);
-            document.getElementById('sync-status').textContent = '同期エラー';
+            const syncStatusElement = document.getElementById('sync-status');
+            if (syncStatusElement) {
+                syncStatusElement.textContent = '同期エラー';
+            }
             this.showPopupNotification('データの同期に失敗しました', 'warning');
         }
     }
