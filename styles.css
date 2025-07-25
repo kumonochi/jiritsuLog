@@ -1728,6 +1728,26 @@ h2 {
     margin-bottom: 10px;
 }
 
+.google-signin-fallback {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    background: white;
+    border: 1px solid #dadce0;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: #3c4043;
+    transition: background-color 0.2s;
+}
+
+.google-signin-fallback:hover {
+    background-color: #f8f9fa;
+    box-shadow: 0 1px 2px 0 rgba(60,64,67,.30), 0 1px 3px 1px rgba(60,64,67,.15);
+}
+
 .user-info-section {
     display: flex;
     flex-direction: column;
