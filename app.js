@@ -24,13 +24,50 @@ class JiritsuLogApp {
     }
 
     init() {
+        // DOM読み込み完了を待ってから初期化
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                this.completeInit();
+            });
+        } else {
+            this.completeInit();
+        }
+    }
+    
+    completeInit() {
+        console.log('=== アプリ初期化開始 ===');
+        console.log('DOM ready state:', document.readyState);
+        
         this.setupEventListeners();
         this.updateSessionNumber();
         this.setCurrentDateTime();
-        this.initGoogleApi();
         this.loadUserSettings();
         this.registerServiceWorker();
         this.setupVoiceRecognition();
+        
+        // Google API初期化は少し遅延させる
+        setTimeout(() => {
+            // HTML要素の存在確認
+            this.debugDOMElements();
+            this.initGoogleApi();
+        }, 100);
+    }
+    
+    // デバッグ用DOM要素確認
+    debugDOMElements() {
+        console.log('=== DOM要素確認 ===');
+        console.log('settings-page:', document.getElementById('settings-page'));
+        console.log('google-auth-section:', document.querySelector('.google-auth-section'));
+        console.log('google-signin-section:', document.getElementById('google-signin-section'));
+        console.log('google-signin-button:', document.getElementById('google-signin-button'));
+        console.log('google-user-info:', document.getElementById('google-user-info'));
+        
+        // 設定ページが表示されているかチェック
+        const settingsPage = document.getElementById('settings-page');
+        if (settingsPage) {
+            console.log('設定ページのクラス:', settingsPage.className);
+            console.log('設定ページの表示状態:', window.getComputedStyle(settingsPage).display);
+        }
     }
 
     registerServiceWorker() {
@@ -2772,8 +2809,11 @@ class JiritsuLogApp {
     async initGoogleApi() {
         try {
             // デバッグ情報を表示
-            console.log('Google API初期化開始');
+            console.log('=== Google API初期化開始 ===');
             console.log('Client ID:', this.GOOGLE_CLIENT_ID);
+            console.log('現在のURL:', window.location.href);
+            console.log('gapi利用可能:', typeof gapi !== 'undefined');
+            console.log('google利用可能:', typeof google !== 'undefined');
             
             await new Promise((resolve) => {
                 if (typeof gapi !== 'undefined') {
@@ -2828,61 +2868,125 @@ class JiritsuLogApp {
     
     // Google サインイン初期化
     initGoogleSignIn() {
+        console.log('=== Google サインイン初期化開始 ===');
+        
+        // DOM要素の存在確認
+        const checkElement = () => {
+            const buttonElement = document.getElementById('google-signin-button');
+            console.log('google-signin-button要素:', buttonElement);
+            return buttonElement;
+        };
+        
         // Google APIの読み込みを待つ
-        const waitForGoogle = () => {
+        const waitForGoogle = (attempts = 0) => {
+            console.log(`Google API待機中... (試行 ${attempts + 1})`);
+            console.log('google undefined?', typeof google === 'undefined');
+            console.log('google.accounts?', typeof google !== 'undefined' && google.accounts);
+            
             if (typeof google !== 'undefined' && google.accounts) {
+                console.log('Google API利用可能');
+                
                 if (this.GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID') {
                     try {
+                        console.log('Google認証初期化中...');
                         google.accounts.id.initialize({
                             client_id: this.GOOGLE_CLIENT_ID,
                             callback: this.handleCredentialResponse.bind(this)
                         });
 
-                        const buttonElement = document.getElementById('google-signin-button');
+                        const buttonElement = checkElement();
                         if (buttonElement) {
+                            console.log('Googleボタンをレンダリング中...');
                             google.accounts.id.renderButton(buttonElement, { 
                                 theme: 'outline', 
                                 size: 'large',
                                 text: 'signin_with',
                                 locale: 'ja'
                             });
+                            console.log('Googleボタンレンダリング完了');
+                        } else {
+                            console.error('google-signin-button要素が見つかりません');
+                            setTimeout(() => {
+                                console.log('要素待機後に再試行...');
+                                this.initGoogleSignIn();
+                            }, 1000);
                         }
                     } catch (error) {
                         console.error('Google Sign-In初期化エラー:', error);
                         this.showFallbackSignInButton();
                     }
                 } else {
+                    console.log('クライアントIDが設定されていません');
                     this.showFallbackSignInButton();
                 }
             } else {
-                // Google APIがまだ読み込まれていない場合は少し待つ
-                setTimeout(waitForGoogle, 500);
+                // Google APIがまだ読み込まれていない場合は再試行
+                if (attempts < 20) {  // 最大10秒待機
+                    setTimeout(() => waitForGoogle(attempts + 1), 500);
+                } else {
+                    console.error('Google API読み込みタイムアウト');
+                    this.showFallbackSignInButton();
+                }
             }
         };
         
         waitForGoogle();
+        
+        // 5秒後に強制的にフォールバックボタンを表示
+        setTimeout(() => {
+            const buttonElement = document.getElementById('google-signin-button');
+            if (buttonElement && buttonElement.innerHTML.trim() === '') {
+                console.log('5秒経過後もボタンが空なので強制表示');
+                this.showFallbackSignInButton();
+            }
+        }, 5000);
     }
     
     // フォールバック用のサインインボタンを表示
     showFallbackSignInButton() {
+        console.log('=== フォールバックボタン表示開始 ===');
+        
         // DOM要素の存在を待つ
-        const waitForElement = () => {
+        const waitForElement = (attempts = 0) => {
+            console.log(`DOM要素待機中... (試行 ${attempts + 1})`);
             const buttonElement = document.getElementById('google-signin-button');
+            console.log('buttonElement:', buttonElement);
+            
             if (buttonElement) {
                 buttonElement.innerHTML = `
-                    <button class="google-signin-fallback" onclick="app.showGoogleApiWarning()">
-                        <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" width="18" height="18">
+                    <button class="google-signin-fallback" onclick="app.handleFallbackLogin()">
+                        <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" width="18" height="18" onerror="this.style.display='none'">
                         Googleでログイン
                     </button>
+                    <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                        デバッグ: Google API読み込み問題によりフォールバックボタンを表示
+                    </p>
                 `;
                 console.log('フォールバックボタンを表示しました');
             } else {
-                // 要素がまだ存在しない場合は100ms後に再試行
-                setTimeout(waitForElement, 100);
+                // 要素がまだ存在しない場合は再試行
+                if (attempts < 50) {  // 最大5秒待機
+                    setTimeout(() => waitForElement(attempts + 1), 100);
+                } else {
+                    console.error('google-signin-button要素が見つかりません（タイムアウト）');
+                    // 全体のDOM構造をチェック
+                    console.log('全体のDOM構造チェック:');
+                    console.log('設定ページ:', document.getElementById('settings-page'));
+                    console.log('アカウント連携セクション:', document.querySelector('.google-auth-section'));
+                }
             }
         };
         
         waitForElement();
+    }
+    
+    // フォールバックログイン処理
+    handleFallbackLogin() {
+        console.log('フォールバックログインボタンがクリックされました');
+        this.showPopupNotification('Google APIの読み込みに問題があります。ページを再読み込みしてください。', 'warning');
+        
+        // 手動でOAuth2フローを開始
+        this.requestAccessToken();
     }
     
     // Google API警告表示
