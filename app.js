@@ -1353,6 +1353,14 @@ class JiritsuLogApp {
         const key = this.getStorageKey('records');
         const stored = localStorage.getItem(key);
         const records = stored ? JSON.parse(stored) : [];
+        
+        // データを日付と時間でソート（最新が上に来るように）
+        records.sort((a, b) => {
+            const dateA = new Date(a.date + ' ' + (a.startTime || '00:00'));
+            const dateB = new Date(b.date + ' ' + (b.startTime || '00:00'));
+            return dateB - dateA; // 降順（最新が先頭）
+        });
+        
         this.debugLog('記録データを読み込み:', key, records.length + '件');
         return records;
     }
@@ -3650,7 +3658,8 @@ class JiritsuLogApp {
                             console.log('✅ Googleサインインボタンのレンダリングが完了しました');
                             return true;
                         } else {
-                            console.log('google-signin-button要素が見つからないか非表示です');
+                            // google-signin-button要素が見つからない場合は正常（設定ページ以外では表示されない）
+                            // このメッセージは削除して不要なコンソール出力を減らす
                             return false;
                         }
                     };
@@ -3661,7 +3670,7 @@ class JiritsuLogApp {
                         console.log('要素の準備完了を待機中...');
                         setTimeout(() => {
                             if (!renderButton()) {
-                                console.log('要素待機後も失敗 - フォールバック表示準備');
+                                this.debugLog('要素待機後も失敗 - フォールバック表示準備（正常動作）');
                             }
                         }, 1000);
                     }
@@ -4049,7 +4058,9 @@ class JiritsuLogApp {
                     await this.requestAccessToken();
                 } else {
                     // アクセストークンがある場合は直接同期
-                    this.syncDataWithGoogle();
+                    await this.syncDataWithGoogle();
+                    // 同期後、クラウドから最新データを取得
+                    await this.loadDataFromGoogle();
                 }
             });
         }
@@ -4121,21 +4132,30 @@ class JiritsuLogApp {
                 syncStatusElement.textContent = '同期中...';
             }
             
-            // データをJSONとして準備
+            // アカウント情報とデータをJSONとして準備
             const dataToSync = {
+                userInfo: {
+                    name: this.currentUser.name,
+                    email: this.currentUser.email,
+                    sub: this.currentUser.sub
+                },
                 records: this.records,
                 settings: this.settings,
-                lastSync: new Date().toISOString()
+                lastSync: new Date().toISOString(),
+                version: '0.43'
             };
             
             const jsonData = JSON.stringify(dataToSync, null, 2);
             const blob = new Blob([jsonData], { type: 'application/json' });
             
-            // Google Driveにファイルを保存
+            // Google Driveにアカウント別ファイルを保存
+            const fileName = `jiritsu_log_backup_${this.currentUser.sub}.json`;
             const metadata = {
-                name: 'jiritsu_log_backup.json',
+                name: fileName,
                 parents: ['appDataFolder']
             };
+            
+            this.debugLog('Google Drive同期開始:', fileName);
             
             const form = new FormData();
             form.append('metadata', new Blob([JSON.stringify(metadata)], {type: 'application/json'}));
@@ -4154,6 +4174,8 @@ class JiritsuLogApp {
                     syncStatusElement.textContent = '同期済み';
                 }
                 this.showPopupNotification('データをクラウドに保存しました', 'success');
+                this.addSyncHistory('データアップロード', true, `${this.records.length}件の記録をGoogle Driveに同期`, fileName);
+                this.debugLog('Google Drive同期成功:', fileName);
             } else {
                 const errorText = await response.text();
                 console.error('同期レスポンスエラー:', errorText);
@@ -4164,17 +4186,79 @@ class JiritsuLogApp {
                     this.showPopupNotification('認証が期限切れです。再度認証してください', 'warning');
                     await this.requestAccessToken();
                 } else {
+                    this.addSyncHistory('データアップロード', false, 'Google Drive同期に失敗', `HTTP ${response.status}: ${errorText}`);
                     throw new Error(`同期に失敗しました (${response.status})`);
                 }
             }
             
         } catch (error) {
             console.error('同期エラー:', error);
+            this.addSyncHistory('データアップロード', false, 'Google同期エラー', error.message);
             const syncStatusElement = document.getElementById('sync-status');
             if (syncStatusElement) {
                 syncStatusElement.textContent = '同期エラー';
             }
             this.showPopupNotification('データの同期に失敗しました', 'warning');
+        }
+    }
+    
+    // Google Drive からデータをダウンロードして復元
+    async loadDataFromGoogle() {
+        try {
+            if (!this.isSignedIn) {
+                this.showPopupNotification('Googleアカウントにログインしてください', 'warning');
+                return;
+            }
+
+            // ユーザー固有のファイル名を使用
+            const fileName = `jiritsu_log_backup_${this.currentUser.sub}.json`;
+            
+            // Google Drive APIでファイルを検索
+            const response = await gapi.client.drive.files.list({
+                q: `name='${fileName}' and mimeType='application/json'`,
+                spaces: 'drive',
+                fields: 'files(id, name, modifiedTime)'
+            });
+
+            if (response.result.files && response.result.files.length > 0) {
+                const file = response.result.files[0];
+                
+                // ファイルの内容を取得
+                const fileContent = await gapi.client.drive.files.get({
+                    fileId: file.id,
+                    alt: 'media'
+                });
+
+                // JSONデータをパース
+                const backupData = JSON.parse(fileContent.body);
+                
+                // データを復元（アカウント固有のキーに保存）
+                if (backupData.records) {
+                    const recordsKey = this.getStorageKey('records');
+                    localStorage.setItem(recordsKey, JSON.stringify(backupData.records));
+                }
+                
+                if (backupData.settings) {
+                    const settingsKey = this.getStorageKey('settings');
+                    localStorage.setItem(settingsKey, JSON.stringify(backupData.settings));
+                }
+                
+                // 同期履歴を更新
+                this.addSyncHistory('データダウンロード', true, `クラウドからデータを復元しました (${new Date(file.modifiedTime).toLocaleString()})`);
+                
+                // UIを更新
+                this.loadRecords();
+                this.loadSettings();
+                
+                this.showPopupNotification('クラウドからデータを復元しました', 'success');
+            } else {
+                this.showPopupNotification('クラウドにバックアップファイルが見つかりません', 'info');
+            }
+            
+        } catch (error) {
+            console.error('データ復元エラー:', error);
+            this.addSyncHistory('データダウンロード', false, 'Google復元エラー', error.message);
+            this.showPopupNotification('データの復元に失敗しました', 'warning');
         }
     }
     
