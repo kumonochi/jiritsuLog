@@ -3950,19 +3950,36 @@ class JiritsuLogApp {
                         
                         // 403エラーの場合は具体的なメッセージを表示
                         if (auth2Error.error === 'server_error') {
-                            this.showPopupNotification('❌ OAuth設定エラー: テストユーザーに fortune.telling18@gmail.com を追加してください', 'error');
+                            this.showPopupNotification('❌ OAuth設定エラー: 代替認証方法を試行します', 'warning');
                             // 詳細手順をコンソールに出力
                             console.error(`
-🔧 Google Cloud Console設定手順:
-1. https://console.cloud.google.com/ にアクセス
-2. APIとサービス → OAuth同意画面
-3. 画面下部「テストユーザー」セクション
-4. 「ユーザーを追加」をクリック
-5. fortune.telling18@gmail.com を追加
-6. 保存をクリック
+🚨 OAuth 403エラー - 設定確認が必要:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 Google Cloud Console設定確認手順:
+
+1. 🌐 https://console.cloud.google.com/ にアクセス
+2. 📊 「APIとサービス」→「OAuth同意画面」
+3. 👥 画面下部「テストユーザー」セクション
+4. ➕ 「ユーザーを追加」をクリック
+5. 📧 fortune.telling18@gmail.com を追加
+6. 💾 「保存」をクリック
+
+🔍 追加確認事項:
+   • OAuth 2.0 クライアントID設定
+   • 承認済みJavaScript生成元: https://kumonochi.github.io
+   • 承認済みリダイレクトURI: https://kumonochi.github.io/jiritsuLog/index.html
+   • Google Drive API有効化
 
 現在のClient ID: ${this.GOOGLE_CLIENT_ID}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 代替認証方法を自動実行します...
                             `);
+                            
+                            // 代替認証方法を試行
+                            setTimeout(() => {
+                                this.initAlternativeAuth();
+                            }, 2000);
                         } else {
                             this.showPopupNotification(`❌ 認証エラー: ${auth2Error.error}`, 'warning');
                         }
@@ -4113,8 +4130,27 @@ class JiritsuLogApp {
                     
                     if (!this.accessToken) {
                         // アクセストークンがない場合は認証フローを開始
-                        this.showPopupNotification('🔧 認証が必要です。設定テストを実行後、認証を開始します...', 'info');
-                        await this.requestAccessToken();
+                        this.showPopupNotification('🔧 認証が必要です。標準認証を試行します...', 'info');
+                        
+                        try {
+                            await this.requestAccessToken();
+                            
+                            // 標準認証が失敗した場合は代替認証を提案
+                            if (!this.accessToken) {
+                                setTimeout(() => {
+                                    if (confirm('標準認証に失敗しました。代替認証方法を試行しますか？\n（新しいウィンドウで認証画面が開きます）')) {
+                                        this.initAlternativeAuth();
+                                    }
+                                }, 2000);
+                            }
+                        } catch (authError) {
+                            this.debugLog('標準認証失敗 - 代替認証を提案');
+                            setTimeout(() => {
+                                if (confirm('認証に失敗しました。代替認証方法（ポップアップ）を試行しますか？')) {
+                                    this.initAlternativeAuth();
+                                }
+                            }, 1000);
+                        }
                     } else {
                         // アクセストークンがある場合は直接同期
                         this.debugLog('既存トークンで同期開始');
@@ -4397,10 +4433,12 @@ class JiritsuLogApp {
                 hostname: window.location.hostname,
                 origin: window.location.origin,
                 url: window.location.href,
-                userAgent: navigator.userAgent
+                userAgent: navigator.userAgent,
+                protocol: window.location.protocol
             },
             configuration: {
                 clientId: this.GOOGLE_CLIENT_ID,
+                clientIdLength: this.GOOGLE_CLIENT_ID?.length || 0,
                 scopes: this.SCOPES,
                 discoveryDoc: this.DISCOVERY_DOC
             },
@@ -4408,19 +4446,67 @@ class JiritsuLogApp {
                 gapi: typeof gapi !== 'undefined',
                 googleAccounts: typeof google !== 'undefined' && !!google.accounts,
                 gapiAuth2: typeof gapi !== 'undefined' && !!gapi.auth2,
-                gapiClient: typeof gapi !== 'undefined' && !!gapi.client
+                gapiClient: typeof gapi !== 'undefined' && !!gapi.client,
+                gapiClientDrive: typeof gapi !== 'undefined' && !!gapi.client && !!gapi.client.drive
             },
             currentState: {
                 isSignedIn: this.isSignedIn,
                 hasAccessToken: !!this.accessToken,
-                currentUser: this.currentUser?.email || 'None'
+                currentUser: this.currentUser?.email || 'None',
+                userId: this.currentUser?.sub || 'None'
             }
         };
         
-        this.debugLog('診断結果:', diagnostics);
+        this.debugLog('📊 詳細診断結果:', diagnostics);
+        
+        // OAuth設定の詳細検証
+        this.debugLog('🔍 OAuth設定検証:');
+        console.log(`
+🔧 現在のOAuth設定検証:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📍 環境情報:
+   • URL: ${window.location.href}
+   • Origin: ${window.location.origin}
+   • Protocol: ${window.location.protocol}
+   • Hostname: ${window.location.hostname}
+
+🔑 OAuth設定:
+   • Client ID: ${this.GOOGLE_CLIENT_ID}
+   • Client ID長: ${this.GOOGLE_CLIENT_ID?.length || 0}文字
+   • スコープ: ${this.SCOPES}
+   • 期待されるリダイレクトURI: ${window.location.origin}/jiritsuLog/index.html
+
+📋 必要なGoogle Cloud Console設定:
+   1. OAuth 2.0 クライアントID設定:
+      - アプリケーションの種類: ウェブアプリケーション
+      - 承認済みJavaScript生成元: ${window.location.origin}
+      - 承認済みリダイレクトURI: ${window.location.origin}/jiritsuLog/index.html
+
+   2. OAuth同意画面設定:
+      - ユーザータイプ: 外部
+      - 公開ステータス: テスト
+      - テストユーザー: fortune.telling18@gmail.com ← 🚨 重要
+
+   3. API有効化:
+      - Google Drive API: 有効
+
+🔍 現在のAPI状態:
+   • gapi: ${diagnostics.apiAvailability.gapi ? '✅' : '❌'}
+   • google.accounts: ${diagnostics.apiAvailability.googleAccounts ? '✅' : '❌'}
+   • gapi.auth2: ${diagnostics.apiAvailability.gapiAuth2 ? '✅' : '❌'}
+   • gapi.client: ${diagnostics.apiAvailability.gapiClient ? '✅' : '❌'}
+   • gapi.client.drive: ${diagnostics.apiAvailability.gapiClientDrive ? '✅' : '❌'}
+
+👤 認証状態:
+   • サインイン済み: ${this.isSignedIn ? '✅' : '❌'}
+   • アクセストークン: ${!!this.accessToken ? '✅' : '❌'}
+   • ユーザー: ${this.currentUser?.email || 'なし'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        `);
         
         // 設定の妥当性チェック
         const issues = [];
+        const warnings = [];
         
         if (!this.GOOGLE_CLIENT_ID || this.GOOGLE_CLIENT_ID.length < 50) {
             issues.push('❌ Client IDが設定されていないか無効です');
@@ -4438,15 +4524,117 @@ class JiritsuLogApp {
             issues.push('❌ HTTPS環境が必要です');
         }
         
+        if (!diagnostics.apiAvailability.gapiClientDrive) {
+            warnings.push('⚠️ Google Drive API未初期化（初期化待ち）');
+        }
+        
         if (issues.length > 0) {
-            this.errorLog('設定診断で問題を検出:', issues);
+            this.errorLog('🚨 設定診断で問題を検出:', issues);
             this.showPopupNotification(`設定に問題があります: ${issues.join(', ')}`, 'error');
+        } else if (warnings.length > 0) {
+            this.debugLog('⚠️ 警告:', warnings);
+            this.showPopupNotification('⚠️ 基本設定は正常ですが、API初期化待ちです', 'warning');
         } else {
             this.debugLog('✅ 基本設定は正常です');
             this.showPopupNotification('✅ 基本設定は正常です。認証テストを実行中...', 'info');
         }
         
         return diagnostics;
+    }
+    
+    // 代替認証方法（ポップアップ認証）
+    async initAlternativeAuth() {
+        try {
+            this.debugLog('🔄 代替認証方法を開始...');
+            
+            // 直接OAuth 2.0ポップアップ認証を実行
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                `client_id=${this.GOOGLE_CLIENT_ID}&` +
+                `redirect_uri=${encodeURIComponent(window.location.origin + '/jiritsuLog/index.html')}&` +
+                `response_type=token&` +
+                `scope=${encodeURIComponent(this.SCOPES)}&` +
+                `include_granted_scopes=true&` +
+                `state=alternative_auth&` +
+                `prompt=consent`; // 強制的に同意画面を表示
+            
+            this.debugLog('🌐 代替認証URL:', authUrl);
+            this.showPopupNotification('🔄 代替認証ウィンドウを開いています...', 'info');
+            
+            // 認証ポップアップを開く
+            const popup = window.open(
+                authUrl, 
+                'alternative_oauth', 
+                'width=600,height=700,scrollbars=yes,resizable=yes,location=yes'
+            );
+            
+            if (popup) {
+                this.debugLog('✅ 代替認証ポップアップが開かれました');
+                this.showPopupNotification('認証ウィンドウで「許可」をクリックしてください', 'info');
+                
+                // ポップアップ監視
+                const checkPopup = setInterval(() => {
+                    try {
+                        if (popup.closed) {
+                            clearInterval(checkPopup);
+                            this.debugLog('代替認証ポップアップが閉じられました');
+                            
+                            // ハッシュをチェックしてトークンを取得
+                            const hash = window.location.hash;
+                            if (hash && hash.includes('access_token=')) {
+                                this.handleAlternativeAuthSuccess(hash);
+                            } else {
+                                this.showPopupNotification('認証がキャンセルされました', 'warning');
+                            }
+                        }
+                    } catch (e) {
+                        // Cross-origin エラーは無視
+                    }
+                }, 1000);
+                
+                // 5分後にタイムアウト
+                setTimeout(() => {
+                    if (!popup.closed) {
+                        clearInterval(checkPopup);
+                        popup.close();
+                        this.showPopupNotification('認証がタイムアウトしました', 'warning');
+                    }
+                }, 300000);
+                
+            } else {
+                this.showPopupNotification('❌ ポップアップがブロックされました。ポップアップ許可後に再試行してください。', 'error');
+            }
+            
+        } catch (error) {
+            this.errorLog('代替認証エラー:', error);
+            this.showPopupNotification('代替認証に失敗しました', 'error');
+        }
+    }
+    
+    // 代替認証成功時の処理
+    handleAlternativeAuthSuccess(hash) {
+        try {
+            const params = new URLSearchParams(hash.substring(1));
+            const accessToken = params.get('access_token');
+            
+            if (accessToken) {
+                this.accessToken = accessToken;
+                this.debugLog('✅ 代替認証でアクセストークン取得成功');
+                this.showPopupNotification('✅ 代替認証が成功しました！', 'success');
+                
+                // ハッシュをクリア
+                window.location.hash = '';
+                
+                // 同期を実行
+                setTimeout(() => {
+                    this.syncDataWithGoogle();
+                }, 1000);
+            } else {
+                this.showPopupNotification('❌ 代替認証でトークン取得に失敗しました', 'error');
+            }
+        } catch (error) {
+            this.errorLog('代替認証成功処理エラー:', error);
+            this.showPopupNotification('認証処理中にエラーが発生しました', 'error');
+        }
     }
     
     // 記録保存時の自動同期
