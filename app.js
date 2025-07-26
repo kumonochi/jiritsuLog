@@ -20,7 +20,114 @@ class JiritsuLogApp {
         this.DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
         this.SCOPES = 'https://www.googleapis.com/auth/drive.file';
         
+        // 環境検出とデバッグ
+        this.debugMode = true;
+        this.environment = this.detectEnvironment();
+        this.debugLog('環境検出結果:', this.environment);
+        
         this.init();
+    }
+
+    // 環境検出
+    detectEnvironment() {
+        const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
+        const port = window.location.port;
+        const origin = window.location.origin;
+        
+        let environment = {
+            hostname: hostname,
+            protocol: protocol,
+            port: port,
+            origin: origin,
+            isLocal: false,
+            isGitHubPages: false,
+            isHTTPS: protocol === 'https:',
+            supportedByGoogleAuth: false
+        };
+        
+        // ローカル環境の検出
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '' || protocol === 'file:') {
+            environment.isLocal = true;
+        }
+        
+        // GitHub Pagesの検出
+        if (hostname.includes('github.io')) {
+            environment.isGitHubPages = true;
+        }
+        
+        // Google認証でサポートされている環境かチェック
+        const supportedOrigins = [
+            'https://kumonochi.github.io',
+            'http://localhost:3000',
+            'http://localhost:8000', 
+            'http://localhost:5000',
+            'http://127.0.0.1:3000',
+            'http://127.0.0.1:8000',
+            'http://127.0.0.1:5000'
+        ];
+        
+        // file://プロトコル、またはサポートされているoriginの場合は有効
+        environment.supportedByGoogleAuth = supportedOrigins.includes(origin) || protocol === 'file:';
+        
+        // file://プロトコルの場合は特別な処理が必要
+        if (protocol === 'file:') {
+            environment.requiresSpecialHandling = true;
+        }
+        
+        return environment;
+    }
+    
+    // デバッグログ出力
+    debugLog(message, ...args) {
+        if (this.debugMode) {
+            console.log(`[🔧 DEBUG] ${message}`, ...args);
+        }
+    }
+    
+    // エラーログ出力
+    errorLog(message, ...args) {
+        console.error(`[❌ ERROR] ${message}`, ...args);
+        this.showPopupNotification(`エラー: ${message}`, 'error');
+    }
+    
+    // 警告ログ出力
+    warnLog(message, ...args) {
+        console.warn(`[⚠️ WARN] ${message}`, ...args);
+        this.showPopupNotification(`警告: ${message}`, 'warning');
+    }
+    
+    // 環境警告表示
+    showEnvironmentWarning() {
+        const warningHtml = `
+            <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                <h4 style="color: #856404; margin: 0 0 10px 0;">⚠️ Google認証環境エラー</h4>
+                <p style="color: #856404; margin: 0;">
+                    現在の環境 (${this.environment.origin}) はGoogle OAuth認証でサポートされていません。<br>
+                    以下のいずれかの環境で実行してください：
+                </p>
+                <ul style="color: #856404; margin: 10px 0 0 20px;">
+                    <li>https://kumonochi.github.io（GitHub Pages）</li>
+                    <li>http://localhost:3000, 8000, 5000</li>
+                    <li>http://127.0.0.1:3000, 8000, 5000</li>
+                </ul>
+                <p style="color: #856404; margin: 10px 0 0 0; font-size: 12px;">
+                    デバッグ情報: ${JSON.stringify(this.environment, null, 2)}
+                </p>
+            </div>
+        `;
+        
+        // Google認証セクションに警告を表示
+        const authSection = document.getElementById('google-signin-section');
+        if (authSection) {
+            authSection.innerHTML = warningHtml;
+        }
+        
+        // メイン認証セクションにも警告を表示
+        const mainAuthSection = document.getElementById('main-google-signin-section');
+        if (mainAuthSection) {
+            mainAuthSection.innerHTML = warningHtml;
+        }
     }
 
     init() {
@@ -88,22 +195,29 @@ class JiritsuLogApp {
     
     // メインGoogle連携ボタンのセットアップ
     setupMainGoogleSignin() {
-        console.log('=== メインGoogle連携ボタンセットアップ ===');
+        this.debugLog('メインGoogle連携ボタンセットアップ開始');
+        
+        // 環境チェック
+        if (!this.environment.supportedByGoogleAuth) {
+            this.warnLog('現在の環境ではGoogle認証がサポートされていません');
+            this.showEnvironmentWarning();
+            return;
+        }
         
         const mainButton = document.getElementById('main-google-signin-button');
         const manualButton = document.getElementById('manual-google-signin');
         
         if (!mainButton) {
-            console.log('メインGoogle連携ボタン要素が見つかりません');
+            this.debugLog('メインGoogle連携ボタン要素が見つかりません');
             return;
         }
         
-        console.log('メインGoogle連携ボタン要素確認:', mainButton);
+        this.debugLog('メインGoogle連携ボタン要素確認:', mainButton);
         
         // Google APIが利用可能かチェック
         if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
             try {
-                console.log('Google Identity Services利用可能 - メインボタンをレンダリング');
+                this.debugLog('Google Identity Services利用可能 - メインボタンをレンダリング');
                 
                 // Google Identity Services初期化
                 google.accounts.id.initialize({
@@ -122,14 +236,14 @@ class JiritsuLogApp {
                     width: '200'
                 });
                 
-                console.log('✅ メインGoogleボタンのレンダリング完了');
+                this.debugLog('✅ メインGoogleボタンのレンダリング完了');
                 
             } catch (error) {
-                console.error('メインGoogleボタンレンダリングエラー:', error);
+                this.errorLog('メインGoogleボタンレンダリングエラー:', error);
                 this.showManualButton();
             }
         } else {
-            console.log('Google Identity Services未利用可能 - 手動ボタンを表示');
+            this.debugLog('Google Identity Services未利用可能 - 手動ボタンを表示');
             this.showManualButton();
         }
         
@@ -147,7 +261,7 @@ class JiritsuLogApp {
         const manualButton = document.getElementById('manual-google-signin');
         if (manualButton) {
             manualButton.style.display = 'inline-block';
-            console.log('手動Googleサインインボタンを表示しました');
+            this.debugLog('手動Googleサインインボタンを表示しました');
         }
     }
     
@@ -3032,11 +3146,18 @@ class JiritsuLogApp {
     async initGoogleApi() {
         try {
             // デバッグ情報を表示
-            console.log('=== Google API初期化開始 ===');
-            console.log('Client ID:', this.GOOGLE_CLIENT_ID);
-            console.log('現在のURL:', window.location.href);
-            console.log('gapi利用可能:', typeof gapi !== 'undefined');
-            console.log('google利用可能:', typeof google !== 'undefined');
+            this.debugLog('Google API初期化開始');
+            this.debugLog('Client ID:', this.GOOGLE_CLIENT_ID);
+            this.debugLog('現在の環境:', this.environment);
+            this.debugLog('gapi利用可能:', typeof gapi !== 'undefined');
+            this.debugLog('google利用可能:', typeof google !== 'undefined');
+            
+            // 環境チェック
+            if (!this.environment.supportedByGoogleAuth) {
+                this.warnLog(`現在の環境 (${this.environment.origin}) はGoogle認証でサポートされていません`);
+                this.showEnvironmentWarning();
+                return;
+            }
             
             await new Promise((resolve) => {
                 if (typeof gapi !== 'undefined') {
@@ -3126,12 +3247,19 @@ class JiritsuLogApp {
     
     // Googleボタンレンダリングを試行
     tryRenderGoogleButton() {
-        console.log('=== Googleボタンレンダリング試行 ===');
+        this.debugLog('Googleボタンレンダリング試行開始');
+        
+        // 環境チェック
+        if (!this.environment.supportedByGoogleAuth) {
+            this.warnLog('現在の環境ではGoogle認証がサポートされていません');
+            this.showEnvironmentWarning();
+            return;
+        }
         
         if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
             if (this.GOOGLE_CLIENT_ID && this.GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID') {
                 try {
-                    console.log('Google Identity Services初期化中...');
+                    this.debugLog('Google Identity Services初期化中...');
                     
                     // Google Identity Services初期化
                     google.accounts.id.initialize({
