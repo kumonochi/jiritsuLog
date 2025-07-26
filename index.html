@@ -474,7 +474,7 @@
                                     <div id="main-google-signin-button" style="margin-bottom: 10px;"></div>
                                     <p style="font-size: 12px; opacity: 0.8; margin: 8px 0 0 0;">
                                         メインボタンが表示されない場合は
-                                        <a href="#" id="manual-google-signin" onclick="app.handleManualGoogleSignin()" style="
+                                        <a href="#" id="manual-google-signin" style="
                                             color: #FFE082;
                                             text-decoration: underline;
                                             font-size: 12px;
@@ -491,7 +491,7 @@
                                                 <span style="color: #4CAF50;">●</span> 同期済み
                                             </div>
                                         </div>
-                                        <button id="main-google-signout" onclick="app.handleGoogleSignout()" style="
+                                        <button id="main-google-signout" style="
                                             background: rgba(255,255,255,0.2);
                                             color: white;
                                             border: 1px solid rgba(255,255,255,0.3);
@@ -503,7 +503,7 @@
                                         " onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">ログアウト</button>
                                     </div>
                                     <div style="display: flex; gap: 10px;">
-                                        <button id="manual-sync" onclick="app.manualSync()" style="
+                                        <button id="manual-sync" style="
                                             background: rgba(255,255,255,0.2);
                                             color: white;
                                             border: 1px solid rgba(255,255,255,0.3);
@@ -513,7 +513,7 @@
                                             font-size: 13px;
                                             flex: 1;
                                         ">手動同期</button>
-                                        <button onclick="app.showSyncHistory()" style="
+                                        <button id="sync-history-btn" style="
                                             background: rgba(255,255,255,0.1);
                                             color: white;
                                             border: 1px solid rgba(255,255,255,0.2);
@@ -547,7 +547,7 @@
                             fortune.telling18@gmail.com</li>
                     </ul>
                     <div style="text-align: center; margin-top: 30px; padding: 10px; background-color: #f8f9fa; border-radius: 8px; color: #6c757d;">
-                        <small>ver 0.2 - キャッシュ問題修正・UI改善版 (Updated: 2025-01-26)</small>
+                        <small>ver 0.3 - スマートフォン対応・イベントリスナー修正版 (Updated: 2025-01-26)</small>
                     </div>
                 </div>
             </div>

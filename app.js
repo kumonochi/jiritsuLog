@@ -2056,17 +2056,91 @@ class JiritsuLogApp {
     }
 
     async enableNotifications() {
-        if ('Notification' in window) {
-            const permission = await Notification.requestPermission();
-            if (permission === 'granted') {
-                this.setupNotifications();
-                this.showPopupNotification('プッシュ通知が有効になりました！', 'success');
-            } else {
-                this.showPopupNotification('プッシュ通知の許可が必要です', 'warning');
-            }
-        } else {
+        this.debugLog('通知許可要求を開始');
+        
+        if (!('Notification' in window)) {
+            this.errorLog('このブラウザはプッシュ通知をサポートしていません');
             this.showPopupNotification('このブラウザはプッシュ通知をサポートしていません', 'warning');
+            return;
         }
+
+        try {
+            // スマートフォンでの権限要求時に詳細な情報を提供
+            if (this.environment.isLocal || window.innerWidth <= 768) {
+                this.showPopupNotification('通知許可を求めています。ブラウザの許可ダイアログで「許可」を選択してください。', 'info');
+            }
+
+            const permission = await Notification.requestPermission();
+            this.debugLog('通知許可結果:', permission);
+            
+            if (permission === 'granted') {
+                // Service Workerが利用可能か確認
+                if ('serviceWorker' in navigator) {
+                    try {
+                        // Service Worker準備完了まで待機
+                        await this.waitForServiceWorker();
+                        this.setupNotifications();
+                        this.showPopupNotification('プッシュ通知が有効になりました！', 'success');
+                        
+                        // テスト通知を送信（3秒後）
+                        setTimeout(() => {
+                            this.showNotification('通知テスト：じりつログの通知が正常に動作しています！');
+                        }, 3000);
+                        
+                    } catch (error) {
+                        this.errorLog('Service Worker初期化エラー:', error);
+                        this.setupNotifications(); // フォールバック
+                        this.showPopupNotification('通知は有効ですが、一部機能が制限される可能性があります', 'warning');
+                    }
+                } else {
+                    this.setupNotifications();
+                    this.showPopupNotification('プッシュ通知が有効になりました（基本機能のみ）', 'success');
+                }
+            } else if (permission === 'denied') {
+                this.errorLog('通知許可が拒否されました');
+                this.showPopupNotification('通知許可が拒否されました。ブラウザ設定から手動で許可してください。', 'warning');
+            } else {
+                this.warnLog('通知許可がデフォルト状態です');
+                this.showPopupNotification('通知許可が必要です。再度お試しください。', 'info');
+            }
+        } catch (error) {
+            this.errorLog('通知許可取得エラー:', error);
+            this.showPopupNotification('通知許可の取得に失敗しました', 'error');
+        }
+    }
+    
+    // Service Worker準備完了まで待機
+    async waitForServiceWorker() {
+        if (!('serviceWorker' in navigator)) {
+            throw new Error('Service Worker not supported');
+        }
+        
+        // 既に登録済みの場合
+        if (this.swRegistration) {
+            return this.swRegistration;
+        }
+        
+        // 登録完了まで最大10秒待機
+        return new Promise((resolve, reject) => {
+            let attempts = 0;
+            const maxAttempts = 20; // 10秒 (500ms * 20)
+            
+            const checkRegistration = () => {
+                attempts++;
+                this.debugLog(`Service Worker待機中 (${attempts}/${maxAttempts})`);
+                
+                if (this.swRegistration) {
+                    this.debugLog('Service Worker準備完了');
+                    resolve(this.swRegistration);
+                } else if (attempts < maxAttempts) {
+                    setTimeout(checkRegistration, 500);
+                } else {
+                    reject(new Error('Service Worker registration timeout'));
+                }
+            };
+            
+            checkRegistration();
+        });
     }
 
     setupNotifications() {
@@ -2142,39 +2216,63 @@ class JiritsuLogApp {
     }
 
     async showNotification(message) {
-        if (Notification.permission === 'granted') {
-            // Service Workerが利用可能な場合は、それを使用（actionsサポート）
-            if ('serviceWorker' in navigator && this.swRegistration) {
-                try {
-                    await this.swRegistration.showNotification('じりつログ', {
-                        body: message,
-                        icon: './アイコン.png',
-                        badge: './アイコン.png',
-                        vibrate: [200, 100, 200, 100, 200],
-                        tag: 'jiritsu-reminder',
-                        requireInteraction: true,
-                        actions: [
-                            {
-                                action: 'open',
-                                title: '記録する',
-                                icon: './アイコン.png'
-                            },
-                            {
-                                action: 'close',
-                                title: '後で'
-                            }
-                        ]
-                    });
-                    this.debugLog('Service Worker通知を表示しました');
-                } catch (error) {
-                    this.errorLog('Service Worker通知エラー:', error);
-                    // フォールバック：シンプルな通知
-                    this.showSimpleNotification(message);
+        this.debugLog('通知表示開始:', message);
+        
+        if (Notification.permission !== 'granted') {
+            this.warnLog('通知許可がありません:', Notification.permission);
+            return;
+        }
+
+        // スマートフォン検出
+        const isMobile = window.innerWidth <= 768 || /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
+        // Service Workerが利用可能な場合は、それを使用（actionsサポート）
+        if ('serviceWorker' in navigator && this.swRegistration) {
+            try {
+                const notificationOptions = {
+                    body: message,
+                    icon: './アイコン.png',
+                    badge: './アイコン.png',
+                    tag: 'jiritsu-reminder',
+                    renotify: true,
+                    data: {
+                        url: window.location.href
+                    }
+                };
+                
+                // モバイルデバイスでのバイブレーション
+                if (isMobile && 'vibrate' in navigator) {
+                    notificationOptions.vibrate = [200, 100, 200, 100, 200];
                 }
-            } else {
-                // Service Workerが利用不可の場合：シンプルな通知
+                
+                // デスクトップでのみアクションボタンを追加
+                if (!isMobile) {
+                    notificationOptions.actions = [
+                        {
+                            action: 'open',
+                            title: '記録する',
+                            icon: './アイコン.png'
+                        },
+                        {
+                            action: 'close',
+                            title: '後で'
+                        }
+                    ];
+                    notificationOptions.requireInteraction = true;
+                }
+                
+                await this.swRegistration.showNotification('じりつログ', notificationOptions);
+                this.debugLog('Service Worker通知を表示しました (Mobile:', isMobile, ')');
+                
+            } catch (error) {
+                this.errorLog('Service Worker通知エラー:', error);
+                // フォールバック：シンプルな通知
                 this.showSimpleNotification(message);
             }
+        } else {
+            // Service Workerが利用不可の場合：シンプルな通知
+            this.debugLog('Service Worker未対応 - シンプル通知を使用');
+            this.showSimpleNotification(message);
         }
     }
     
@@ -3669,21 +3767,56 @@ class JiritsuLogApp {
     
     // Google認証関連イベントリスナー設定
     setupGoogleAuthListeners() {
-        // ログアウトボタン
-        document.getElementById('google-signout').addEventListener('click', () => {
-            this.signOut();
-        });
+        // メインログアウトボタン（新しいID）
+        const mainSignoutBtn = document.getElementById('main-google-signout');
+        if (mainSignoutBtn) {
+            // onclick属性を削除して、イベントリスナーで管理
+            mainSignoutBtn.removeAttribute('onclick');
+            mainSignoutBtn.addEventListener('click', () => {
+                this.handleGoogleSignout();
+            });
+        }
         
-        // 手動同期ボタン
-        document.getElementById('manual-sync').addEventListener('click', async () => {
-            if (!this.accessToken) {
-                // アクセストークンがない場合は認証フローを開始
-                await this.requestAccessToken();
-            } else {
-                // アクセストークンがある場合は直接同期
-                this.syncDataWithGoogle();
-            }
-        });
+        // 手動同期ボタン（新しいID）
+        const manualSyncBtn = document.getElementById('manual-sync');
+        if (manualSyncBtn) {
+            // onclick属性を削除して、イベントリスナーで管理
+            manualSyncBtn.removeAttribute('onclick');
+            manualSyncBtn.addEventListener('click', async () => {
+                if (!this.accessToken) {
+                    // アクセストークンがない場合は認証フローを開始
+                    await this.requestAccessToken();
+                } else {
+                    // アクセストークンがある場合は直接同期
+                    this.syncDataWithGoogle();
+                }
+            });
+        }
+        
+        // 手動Googleサインインリンク
+        const manualSigninLink = document.getElementById('manual-google-signin');
+        if (manualSigninLink) {
+            // onclick属性を削除して、イベントリスナーで管理
+            manualSigninLink.removeAttribute('onclick');
+            manualSigninLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.handleManualGoogleSignin();
+            });
+        }
+        
+        // 同期履歴ボタン
+        const syncHistoryBtn = document.getElementById('sync-history-btn');
+        if (syncHistoryBtn) {
+            syncHistoryBtn.addEventListener('click', () => {
+                this.showSyncHistory();
+            });
+        }
+    }
+    
+    // 同期履歴表示
+    showSyncHistory() {
+        this.debugLog('同期履歴を表示します');
+        this.showPopupNotification('同期履歴機能は今後実装予定です', 'info');
     }
     
     // サインアウト
