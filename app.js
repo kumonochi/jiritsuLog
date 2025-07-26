@@ -28,6 +28,7 @@ class JiritsuLogApp {
         // 重複実行防止フラグ
         this.isRequestingToken = false;
         this.isSyncing = false;
+        this.isAlternativeAuthInProgress = false;
         
         this.init();
     }
@@ -135,6 +136,9 @@ class JiritsuLogApp {
     }
 
     init() {
+        // 認証リダイレクト後の処理をチェック
+        this.checkAuthRedirect();
+        
         // DOM読み込み完了を待ってから初期化
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
@@ -142,6 +146,39 @@ class JiritsuLogApp {
             });
         } else {
             this.completeInit();
+        }
+    }
+    
+    // 認証リダイレクト後の処理
+    checkAuthRedirect() {
+        const hash = window.location.hash;
+        const urlParams = new URLSearchParams(window.location.search);
+        const state = urlParams.get('state') || (hash ? new URLSearchParams(hash.substring(1)).get('state') : null);
+        
+        this.debugLog('認証リダイレクトチェック:', {
+            hash,
+            state,
+            hasAccessToken: hash && hash.includes('access_token=')
+        });
+        
+        // リダイレクト認証の場合
+        if (hash && hash.includes('access_token=') && state === 'redirect_auth') {
+            this.debugLog('🔄 リダイレクト認証結果を処理中...');
+            
+            // 無限ループ防止のため、フラグをリセット
+            this.isAlternativeAuthInProgress = false;
+            
+            // 認証成功処理
+            setTimeout(() => {
+                this.handleAlternativeAuthSuccess(hash);
+            }, 1000);
+        }
+        
+        // 認証試行の記録をクリア
+        const authAttempt = sessionStorage.getItem('jiritsu_auth_attempt');
+        if (authAttempt) {
+            sessionStorage.removeItem('jiritsu_auth_attempt');
+            this.debugLog('認証試行記録をクリア:', JSON.parse(authAttempt));
         }
     }
     
@@ -4542,71 +4579,49 @@ class JiritsuLogApp {
         return diagnostics;
     }
     
-    // 代替認証方法（ポップアップ認証）
+    // 代替認証方法（リダイレクトベース認証 - COOP対応）
     async initAlternativeAuth() {
         try {
-            this.debugLog('🔄 代替認証方法を開始...');
+            // 重複実行防止
+            if (this.isAlternativeAuthInProgress) {
+                this.debugLog('⚠️ 代替認証は既に進行中です');
+                return;
+            }
             
-            // 直接OAuth 2.0ポップアップ認証を実行
+            this.isAlternativeAuthInProgress = true;
+            this.debugLog('🔄 COOP対応代替認証方法を開始...');
+            
+            // 現在のページ内でリダイレクト認証を実行（ポップアップ不使用）
+            const currentUrl = window.location.href.split('#')[0].split('?')[0];
             const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
                 `client_id=${this.GOOGLE_CLIENT_ID}&` +
-                `redirect_uri=${encodeURIComponent(window.location.origin + '/jiritsuLog/index.html')}&` +
+                `redirect_uri=${encodeURIComponent(currentUrl)}&` +
                 `response_type=token&` +
                 `scope=${encodeURIComponent(this.SCOPES)}&` +
                 `include_granted_scopes=true&` +
-                `state=alternative_auth&` +
+                `state=redirect_auth&` +
                 `prompt=consent`; // 強制的に同意画面を表示
             
-            this.debugLog('🌐 代替認証URL:', authUrl);
-            this.showPopupNotification('🔄 代替認証ウィンドウを開いています...', 'info');
+            this.debugLog('🌐 リダイレクト認証URL:', authUrl);
             
-            // 認証ポップアップを開く
-            const popup = window.open(
-                authUrl, 
-                'alternative_oauth', 
-                'width=600,height=700,scrollbars=yes,resizable=yes,location=yes'
-            );
+            // 現在の状態を保存
+            sessionStorage.setItem('jiritsu_auth_attempt', JSON.stringify({
+                timestamp: Date.now(),
+                method: 'redirect_auth',
+                originalUrl: window.location.href
+            }));
             
-            if (popup) {
-                this.debugLog('✅ 代替認証ポップアップが開かれました');
-                this.showPopupNotification('認証ウィンドウで「許可」をクリックしてください', 'info');
-                
-                // ポップアップ監視
-                const checkPopup = setInterval(() => {
-                    try {
-                        if (popup.closed) {
-                            clearInterval(checkPopup);
-                            this.debugLog('代替認証ポップアップが閉じられました');
-                            
-                            // ハッシュをチェックしてトークンを取得
-                            const hash = window.location.hash;
-                            if (hash && hash.includes('access_token=')) {
-                                this.handleAlternativeAuthSuccess(hash);
-                            } else {
-                                this.showPopupNotification('認証がキャンセルされました', 'warning');
-                            }
-                        }
-                    } catch (e) {
-                        // Cross-origin エラーは無視
-                    }
-                }, 1000);
-                
-                // 5分後にタイムアウト
-                setTimeout(() => {
-                    if (!popup.closed) {
-                        clearInterval(checkPopup);
-                        popup.close();
-                        this.showPopupNotification('認証がタイムアウトしました', 'warning');
-                    }
-                }, 300000);
-                
-            } else {
-                this.showPopupNotification('❌ ポップアップがブロックされました。ポップアップ許可後に再試行してください。', 'error');
-            }
+            this.showPopupNotification('🔄 認証ページに移動します...', 'info');
+            
+            // 2秒後にリダイレクト
+            setTimeout(() => {
+                window.location.href = authUrl;
+            }, 2000);
             
         } catch (error) {
             this.errorLog('代替認証エラー:', error);
             this.showPopupNotification('代替認証に失敗しました', 'error');
+            this.isAlternativeAuthInProgress = false;
         }
     }
     
