@@ -184,6 +184,11 @@ class JiritsuLogApp {
                 // アカウント情報復元後にデータを読み込み
                 this.loadUserDataWithAccountInfo();
                 
+                // 復元後に自動でクラウド同期を確認
+                setTimeout(() => {
+                    this.performLoginSync();
+                }, 2000);
+                
             } catch (error) {
                 console.error('保存されたユーザー情報の復元に失敗:', error);
                 localStorage.removeItem('googleUser');
@@ -375,6 +380,9 @@ class JiritsuLogApp {
             userName.textContent = user.name || user.email || 'ユーザー';
             
             console.log('メインユーザー情報UIを更新しました');
+            
+            // ログイン後に自動でクラウドデータ同期を実行
+            this.performLoginSync();
         }
     }
     
@@ -3948,17 +3956,24 @@ class JiritsuLogApp {
     // OAuth 2.0フローを初期化
     async initOAuth2Flow() {
         try {
+            // 現在のページの完全URLを使用してリダイレクトURIを設定
+            const currentUrl = window.location.href.split('#')[0]; // ハッシュ部分を除去
+            const redirectUri = currentUrl.endsWith('.html') ? currentUrl : currentUrl + 'index.html';
+            
             // Google OAuth 2.0エンドポイントを使用
             const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
                 `client_id=${this.GOOGLE_CLIENT_ID}&` +
-                `redirect_uri=${encodeURIComponent(window.location.origin + window.location.pathname)}&` +
+                `redirect_uri=${encodeURIComponent(redirectUri)}&` +
                 `response_type=token&` +
                 `scope=${encodeURIComponent(this.SCOPES)}&` +
                 `include_granted_scopes=true&` +
                 `state=sync_request`;
+                
+            this.debugLog('OAuth認証URL:', authUrl);
+            this.debugLog('Redirect URI:', redirectUri);
             
-            // ポップアップでOAuth認証を行う
-            const popup = window.open(authUrl, 'oauth', 'width=500,height=600');
+            // ポップアップでOAuth認証を行う（Cross-Origin-Opener-Policy対応）
+            const popup = window.open(authUrl, 'oauth', 'width=500,height=600,location=yes,scrollbars=yes,status=yes');
             
             // Cross-Origin-Opener-Policy対応でpopup.closedチェックを避ける
             let pollCount = 0;
@@ -3977,13 +3992,17 @@ class JiritsuLogApp {
                             // ハッシュをクリア
                             window.location.hash = '';
                             
-                            try {
-                                if (popup && typeof popup.close === 'function') {
-                                    popup.close();
+                            // Cross-Origin-Opener-Policy対応でポップアップクローズを安全に実行
+                            setTimeout(() => {
+                                try {
+                                    if (popup && typeof popup.close === 'function') {
+                                        popup.close();
+                                    }
+                                } catch (e) {
+                                    // COOPエラーは無視（正常動作）
+                                    this.debugLog('ポップアップクローズエラー（COOP制限により正常）:', e.message);
                                 }
-                            } catch (e) {
-                                this.debugLog('ポップアップクローズエラー（無視）:', e.message);
-                            }
+                            }, 100);
                             
                             clearInterval(checkInterval);
                             this.syncDataWithGoogle();
@@ -3995,13 +4014,16 @@ class JiritsuLogApp {
                     if (pollCount > 120) {
                         this.warnLog('OAuth認証タイムアウト');
                         clearInterval(checkInterval);
-                        try {
-                            if (popup && typeof popup.close === 'function') {
-                                popup.close();
+                        setTimeout(() => {
+                            try {
+                                if (popup && typeof popup.close === 'function') {
+                                    popup.close();
+                                }
+                            } catch (e) {
+                                // COOPエラーは無視（正常動作）  
+                                this.debugLog('タイムアウト時ポップアップクローズエラー（COOP制限により正常）:', e.message);
                             }
-                        } catch (e) {
-                            this.debugLog('ポップアップクローズエラー（無視）:', e.message);
-                        }
+                        }, 100);
                     }
                     
                 } catch (e) {
@@ -4259,6 +4281,29 @@ class JiritsuLogApp {
             console.error('データ復元エラー:', error);
             this.addSyncHistory('データダウンロード', false, 'Google復元エラー', error.message);
             this.showPopupNotification('データの復元に失敗しました', 'warning');
+        }
+    }
+    
+    // ログイン後の自動同期処理
+    async performLoginSync() {
+        try {
+            this.debugLog('ログイン後の自動同期開始');
+            
+            // 現在のローカルデータを保護するため、まずクラウドから最新データを取得
+            await this.loadDataFromGoogle();
+            
+            // その後、現在のデータをクラウドと同期
+            if (this.accessToken || this.isSignedIn) {
+                await this.syncDataWithGoogle();
+            } else {
+                // アクセストークンがない場合は権限要求
+                await this.requestAccessToken();
+            }
+            
+            this.debugLog('ログイン後の自動同期完了');
+        } catch (error) {
+            this.errorLog('ログイン後の自動同期エラー:', error);
+            this.showPopupNotification('データの同期に部分的に失敗しました', 'warning');
         }
     }
     
