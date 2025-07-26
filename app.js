@@ -25,6 +25,10 @@ class JiritsuLogApp {
         this.environment = this.detectEnvironment();
         this.debugLog('環境検出結果:', this.environment);
         
+        // 重複実行防止フラグ
+        this.isRequestingToken = false;
+        this.isSyncing = false;
+        
         this.init();
     }
 
@@ -295,6 +299,9 @@ class JiritsuLogApp {
             this.isSignedIn = true;
             localStorage.setItem('googleUser', JSON.stringify(this.currentUser));
             
+            // アカウント別データを再読み込み
+            this.loadUserDataAfterLogin();
+            
             this.showPopupNotification('✅ Googleアカウントでログインしました', 'success');
             
         } catch (error) {
@@ -325,13 +332,58 @@ class JiritsuLogApp {
     
     // 手動Googleサインイン処理
     handleManualGoogleSignin() {
-        console.log('手動Googleサインインが実行されました');
+        this.debugLog('手動Googleサインインが実行されました');
+        
+        // OAuth設定の警告を表示
+        this.showOAuthWarning();
         
         // 設定確認
         this.checkGoogleApiConfiguration();
         
         // OAuth2フローを開始
         this.requestAccessToken();
+    }
+    
+    // OAuth設定警告を表示
+    showOAuthWarning() {
+        const warningMessage = `
+            <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                <h4 style="color: #856404; margin: 0 0 10px 0;">⚠️ Google OAuth設定について</h4>
+                <p style="color: #856404; margin: 0 0 10px 0;">
+                    現在、このアプリはGoogle認証の審査プロセス中のため、以下の制限があります：
+                </p>
+                <ul style="color: #856404; margin: 0 0 10px 20px;">
+                    <li>「このアプリは未確認です」の警告が表示される可能性があります</li>
+                    <li>テストユーザーとして登録されたアカウントのみ利用可能です</li>
+                    <li>Google Drive同期機能に制限があります</li>
+                </ul>
+                <p style="color: #856404; margin: 0; font-size: 12px;">
+                    それでも続行する場合は、認証画面で「詳細」→「安全でないページに移動」を選択してください。
+                </p>
+            </div>
+        `;
+        
+        // 一時的にページに警告を表示
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = warningMessage;
+        tempDiv.style.position = 'fixed';
+        tempDiv.style.top = '20px';
+        tempDiv.style.left = '20px';
+        tempDiv.style.right = '20px';
+        tempDiv.style.zIndex = '10000';
+        tempDiv.style.maxWidth = '600px';
+        tempDiv.style.margin = '0 auto';
+        
+        document.body.appendChild(tempDiv);
+        
+        // 10秒後に自動削除
+        setTimeout(() => {
+            if (tempDiv.parentNode) {
+                tempDiv.parentNode.removeChild(tempDiv);
+            }
+        }, 10000);
+        
+        this.showPopupNotification('OAuth認証の注意事項を確認してください', 'warning');
     }
     
     // Googleサインアウト処理
@@ -1237,23 +1289,41 @@ class JiritsuLogApp {
         });
     }
 
-    // データ保存・読み込み
+    // データ保存・読み込み（アカウント連携対応）
     saveRecords() {
-        localStorage.setItem('jiritsulog_records', JSON.stringify(this.records));
+        const key = this.getStorageKey('records');
+        localStorage.setItem(key, JSON.stringify(this.records));
+        this.debugLog('記録データを保存:', key);
+        
+        // Google同期が有効の場合は自動同期をスケジュール
+        if (this.isSignedIn && this.accessToken) {
+            this.scheduleSyncWithGoogle();
+        }
     }
 
     loadRecords() {
-        const stored = localStorage.getItem('jiritsulog_records');
-        return stored ? JSON.parse(stored) : [];
+        const key = this.getStorageKey('records');
+        const stored = localStorage.getItem(key);
+        const records = stored ? JSON.parse(stored) : [];
+        this.debugLog('記録データを読み込み:', key, records.length + '件');
+        return records;
     }
 
     saveSettings() {
-        localStorage.setItem('jiritsulog_settings', JSON.stringify(this.settings));
+        const key = this.getStorageKey('settings');
+        localStorage.setItem(key, JSON.stringify(this.settings));
+        this.debugLog('設定データを保存:', key);
+        
+        // Google同期が有効の場合は自動同期をスケジュール
+        if (this.isSignedIn && this.accessToken) {
+            this.scheduleSyncWithGoogle();
+        }
     }
 
     loadSettings() {
-        const stored = localStorage.getItem('jiritsulog_settings');
-        return stored ? JSON.parse(stored) : {
+        const key = this.getStorageKey('settings');
+        const stored = localStorage.getItem(key);
+        const settings = stored ? JSON.parse(stored) : {
             fontFamily: "'Hiragino Sans', 'Noto Sans JP', sans-serif",
             defaultContent: [],
             customDurations: [],
@@ -1264,6 +1334,57 @@ class JiritsuLogApp {
                 weekly: {}
             }
         };
+        this.debugLog('設定データを読み込み:', key);
+        return settings;
+    }
+    
+    // アカウント別のストレージキーを生成
+    getStorageKey(type) {
+        const baseKey = `jiritsulog_${type}`;
+        
+        // Googleアカウントでログイン済みの場合はユーザーID付きキー
+        if (this.isSignedIn && this.currentUser && this.currentUser.sub) {
+            return `${baseKey}_${this.currentUser.sub}`;
+        }
+        
+        // 未ログインの場合はデフォルトキー
+        return baseKey;
+    }
+    
+    // Google同期のスケジュール（デバウンス）
+    scheduleSyncWithGoogle() {
+        // 既存のタイマーをクリア
+        if (this.syncScheduleTimer) {
+            clearTimeout(this.syncScheduleTimer);
+        }
+        
+        // 3秒後に同期実行（連続変更時のデバウンス）
+        this.syncScheduleTimer = setTimeout(() => {
+            if (this.isSignedIn && this.accessToken) {
+                this.syncDataWithGoogle();
+            }
+        }, 3000);
+    }
+    
+    // ログイン後のユーザーデータ読み込み
+    loadUserDataAfterLogin() {
+        this.debugLog('ログイン後のデータ再読み込み開始');
+        
+        // アカウント別のデータを読み込み
+        this.records = this.loadRecords();
+        this.settings = this.loadSettings();
+        
+        // UIに反映
+        this.displayRecords();
+        this.loadUserSettings();
+        this.loadDurationSettings();
+        
+        this.debugLog('ログイン後のデータ再読み込み完了:', {
+            recordsCount: this.records.length,
+            settings: Object.keys(this.settings)
+        });
+        
+        this.showPopupNotification(`${this.currentUser.name}のデータを読み込みました`, 'success');
     }
 
     loadUserSettings() {
@@ -3647,6 +3768,15 @@ class JiritsuLogApp {
     
     // OAuth 2.0アクセストークンを取得
     async requestAccessToken() {
+        // 重複実行防止
+        if (this.isRequestingToken) {
+            this.debugLog('アクセストークン取得中のため、重複実行をスキップ');
+            return;
+        }
+        
+        this.isRequestingToken = true;
+        this.debugLog('アクセストークン取得開始');
+        
         try {
             // 最初に従来のgapi.auth2を試行
             if (typeof gapi !== 'undefined' && gapi.auth2) {
@@ -3687,8 +3817,12 @@ class JiritsuLogApp {
             await this.initOAuth2Flow();
             
         } catch (error) {
-            console.error('アクセストークン取得エラー:', error);
+            this.errorLog('アクセストークン取得エラー:', error);
             this.showPopupNotification('Google Driveへのアクセス権限が必要です。認証画面で許可してください。', 'warning');
+        } finally {
+            // 重複実行防止フラグをリセット
+            this.isRequestingToken = false;
+            this.debugLog('アクセストークン取得処理完了');
         }
     }
     
@@ -3707,40 +3841,57 @@ class JiritsuLogApp {
             // ポップアップでOAuth認証を行う
             const popup = window.open(authUrl, 'oauth', 'width=500,height=600');
             
-            // URLハッシュを監視してアクセストークンを取得
+            // Cross-Origin-Opener-Policy対応でpopup.closedチェックを避ける
+            let pollCount = 0;
             const checkForToken = () => {
+                pollCount++;
+                
                 try {
-                    if (popup.closed) {
-                        clearInterval(checkInterval);
-                        return;
-                    }
-                    
-                    const hash = popup.location.hash;
-                    if (hash && hash.includes('access_token=')) {
-                        const params = new URLSearchParams(hash.substring(1));
+                    // まずメインウィンドウのハッシュをチェック（リダイレクト後）
+                    const mainHash = window.location.hash;
+                    if (mainHash && mainHash.includes('access_token=')) {
+                        const params = new URLSearchParams(mainHash.substring(1));
                         this.accessToken = params.get('access_token');
-                        popup.close();
-                        clearInterval(checkInterval);
                         
                         if (this.accessToken) {
-                            console.log('OAuth2アクセストークン取得成功');
+                            this.debugLog('メインウィンドウからアクセストークン取得成功');
+                            // ハッシュをクリア
+                            window.location.hash = '';
+                            
+                            try {
+                                if (popup && typeof popup.close === 'function') {
+                                    popup.close();
+                                }
+                            } catch (e) {
+                                this.debugLog('ポップアップクローズエラー（無視）:', e.message);
+                            }
+                            
+                            clearInterval(checkInterval);
                             this.syncDataWithGoogle();
+                            return;
                         }
                     }
+                    
+                    // 2分後にタイムアウト
+                    if (pollCount > 120) {
+                        this.warnLog('OAuth認証タイムアウト');
+                        clearInterval(checkInterval);
+                        try {
+                            if (popup && typeof popup.close === 'function') {
+                                popup.close();
+                            }
+                        } catch (e) {
+                            this.debugLog('ポップアップクローズエラー（無視）:', e.message);
+                        }
+                    }
+                    
                 } catch (e) {
-                    // クロスオリジンエラーは無視
+                    // Cross-Originエラーやその他のエラーは無視
+                    this.debugLog('Token check error (ignored):', e.message);
                 }
             };
             
             const checkInterval = setInterval(checkForToken, 1000);
-            
-            // 2分後にタイムアウト
-            setTimeout(() => {
-                clearInterval(checkInterval);
-                if (!popup.closed) {
-                    popup.close();
-                }
-            }, 120000);
             
         } catch (error) {
             console.error('OAuth2フロー初期化エラー:', error);
