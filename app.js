@@ -149,12 +149,15 @@ class JiritsuLogApp {
         console.log('=== アプリ初期化開始 ===');
         console.log('DOM ready state:', document.readyState);
         
+        // 基本的な初期化（データ読み込みは除く）
         this.setupEventListeners();
         this.updateSessionNumber();
         this.setCurrentDateTime();
-        this.loadUserSettings();
         this.registerServiceWorker();
         this.setupVoiceRecognition();
+        
+        // Googleアカウント情報を先に復元してからデータを読み込み
+        this.restoreGoogleAccountInfo();
         
         // Google API初期化は少し遅延させる
         setTimeout(() => {
@@ -167,21 +170,66 @@ class JiritsuLogApp {
         }, 100);
     }
     
-    // メインGoogle認証セクションの初期化
-    initMainGoogleAuth() {
-        console.log('=== メインGoogle認証初期化開始 ===');
+    // Googleアカウント情報を最初に復元
+    restoreGoogleAccountInfo() {
+        this.debugLog('Googleアカウント情報の復元を開始');
         
-        // 保存されたユーザー情報を復元
         const savedUser = localStorage.getItem('googleUser');
         if (savedUser) {
             try {
                 this.currentUser = JSON.parse(savedUser);
                 this.isSignedIn = true;
-                console.log('保存されたGoogle認証情報を復元しました:', this.currentUser);
+                this.debugLog('保存されたGoogle認証情報を復元:', this.currentUser);
+                
+                // アカウント情報復元後にデータを読み込み
+                this.loadUserDataWithAccountInfo();
+                
             } catch (error) {
                 console.error('保存されたユーザー情報の復元に失敗:', error);
                 localStorage.removeItem('googleUser');
+                
+                // アカウント情報がない場合のデータ読み込み
+                this.loadUserDataWithAccountInfo();
             }
+        } else {
+            this.debugLog('保存されたアカウント情報がありません');
+            
+            // アカウント情報がない場合のデータ読み込み
+            this.loadUserDataWithAccountInfo();
+        }
+    }
+    
+    // アカウント情報を考慮したデータ読み込み
+    loadUserDataWithAccountInfo() {
+        this.debugLog('アカウント情報を考慮したデータ読み込み開始');
+        
+        // アカウント別のデータを読み込み
+        this.records = this.loadRecords();
+        this.settings = this.loadSettings();
+        
+        // UIに反映
+        this.loadUserSettings();
+        this.loadDurationSettings();
+        this.displayRecords();
+        
+        this.debugLog('アカウント情報を考慮したデータ読み込み完了:', {
+            isSignedIn: this.isSignedIn,
+            currentUser: this.currentUser?.name || 'None',
+            recordsCount: this.records.length,
+            storageKey: this.getStorageKey('records')
+        });
+    }
+    
+    // メインGoogle認証セクションの初期化
+    initMainGoogleAuth() {
+        console.log('=== メインGoogle認証初期化開始 ===');
+        
+        // アカウント情報は既に復元済みなのでUIの更新のみ実行
+        if (this.isSignedIn && this.currentUser) {
+            this.debugLog('アカウント情報が既に復元済みです:', this.currentUser);
+            this.updateMainUserInfo(this.currentUser);
+        } else {
+            this.debugLog('アカウント情報がありません');
         }
         
         // 3秒後に初期化（DOM要素とGoogle APIの準備完了を待つ）
@@ -1344,11 +1392,35 @@ class JiritsuLogApp {
         
         // Googleアカウントでログイン済みの場合はユーザーID付きキー
         if (this.isSignedIn && this.currentUser && this.currentUser.sub) {
-            return `${baseKey}_${this.currentUser.sub}`;
+            const accountKey = `${baseKey}_${this.currentUser.sub}`;
+            this.debugLog(`アカウント別キー生成: ${accountKey} (User: ${this.currentUser.name})`);
+            return accountKey;
         }
         
         // 未ログインの場合はデフォルトキー
+        this.debugLog(`デフォルトキー生成: ${baseKey}`);
         return baseKey;
+    }
+    
+    // UIを強制的にリフレッシュ
+    forceUIRefresh() {
+        this.debugLog('UIの強制リフレッシュを実行');
+        
+        // 記録一覧をクリアして再表示
+        const recordsContainer = document.getElementById('records-container');
+        if (recordsContainer) {
+            recordsContainer.innerHTML = '';
+            this.displayRecords();
+        }
+        
+        // 設定項目を再読み込み
+        this.loadUserSettings();
+        this.loadDurationSettings();
+        
+        // セッション番号を更新
+        this.updateSessionNumber();
+        
+        this.debugLog('UIの強制リフレッシュ完了');
     }
     
     // Google同期のスケジュール（デバウンス）
@@ -1366,24 +1438,29 @@ class JiritsuLogApp {
         }, 3000);
     }
     
-    // ログイン後のユーザーデータ読み込み
+    // ログイン後のユーザーデータ読み込み（新規ログイン時のみ）
     loadUserDataAfterLogin() {
-        this.debugLog('ログイン後のデータ再読み込み開始');
+        this.debugLog('新規ログイン後のデータ再読み込み開始');
         
-        // アカウント別のデータを読み込み
+        // 既存のデータをクリアして新しいアカウントのデータを読み込み
         this.records = this.loadRecords();
         this.settings = this.loadSettings();
         
-        // UIに反映
+        // UIを完全に更新
         this.displayRecords();
         this.loadUserSettings();
         this.loadDurationSettings();
         
-        this.debugLog('ログイン後のデータ再読み込み完了:', {
+        // ページをリフレッシュして新しいアカウントのデータを確実に表示
+        this.forceUIRefresh();
+        
+        this.debugLog('新規ログイン後のデータ再読み込み完了:', {
             recordsCount: this.records.length,
-            settings: Object.keys(this.settings)
+            settings: Object.keys(this.settings),
+            storageKey: this.getStorageKey('records')
         });
         
+        this.addSyncHistory('アカウント連携', true, `${this.currentUser.name}のデータを読み込みました`, `記録: ${this.records.length}件`);
         this.showPopupNotification(`${this.currentUser.name}のデータを読み込みました`, 'success');
     }
 
