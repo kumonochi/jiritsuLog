@@ -3950,7 +3950,19 @@ class JiritsuLogApp {
                         
                         // 403エラーの場合は具体的なメッセージを表示
                         if (auth2Error.error === 'server_error') {
-                            this.showPopupNotification('❌ 認証サーバーエラー。Google Cloud Console設定（特にテストユーザー）を確認してください。', 'error');
+                            this.showPopupNotification('❌ OAuth設定エラー: テストユーザーに fortune.telling18@gmail.com を追加してください', 'error');
+                            // 詳細手順をコンソールに出力
+                            console.error(`
+🔧 Google Cloud Console設定手順:
+1. https://console.cloud.google.com/ にアクセス
+2. APIとサービス → OAuth同意画面
+3. 画面下部「テストユーザー」セクション
+4. 「ユーザーを追加」をクリック
+5. fortune.telling18@gmail.com を追加
+6. 保存をクリック
+
+現在のClient ID: ${this.GOOGLE_CLIENT_ID}
+                            `);
                         } else {
                             this.showPopupNotification(`❌ 認証エラー: ${auth2Error.error}`, 'warning');
                         }
@@ -4172,6 +4184,13 @@ class JiritsuLogApp {
             return;
         }
         
+        // gapi.client.driveの初期化確認
+        if (!gapi || !gapi.client || !gapi.client.drive) {
+            this.debugLog('❌ Google Drive API未初期化 - 同期をスキップ');
+            this.showPopupNotification('Google Drive API初期化中です。後で再試行してください。', 'info');
+            return;
+        }
+        
         // アクセストークンがない場合は取得を試行
         if (!this.accessToken) {
             this.showPopupNotification('同期機能の利用にはGoogle Cloud Console設定が必要です', 'info');
@@ -4263,8 +4282,16 @@ class JiritsuLogApp {
                 return;
             }
 
+            // gapi.client.driveの初期化確認
+            if (!gapi || !gapi.client || !gapi.client.drive) {
+                this.debugLog('❌ Google Drive API未初期化 - 初期化を待機中...');
+                this.showPopupNotification('Google Drive API初期化中です。しばらくお待ちください。', 'info');
+                return;
+            }
+
             // ユーザー固有のファイル名を使用
             const fileName = `jiritsu_log_backup_${this.currentUser.sub}.json`;
+            this.debugLog('📁 Google Drive検索開始:', fileName);
             
             // Google Drive APIでファイルを検索
             const response = await gapi.client.drive.files.list({
@@ -4322,8 +4349,22 @@ class JiritsuLogApp {
             this.debugLog('同期開始時の状態:', {
                 isSignedIn: this.isSignedIn,
                 hasAccessToken: !!this.accessToken,
-                currentUser: this.currentUser?.email || 'None'
+                currentUser: this.currentUser?.email || 'None',
+                gapiLoaded: typeof gapi !== 'undefined',
+                gapiClientReady: !!(gapi && gapi.client && gapi.client.drive)
             });
+            
+            // Google Drive API初期化確認
+            if (!gapi || !gapi.client || !gapi.client.drive) {
+                this.debugLog('⏳ Google Drive API未初期化 - 初期化完了まで同期を延期');
+                this.showPopupNotification('Google API初期化完了後に同期します', 'info');
+                
+                // 5秒後に再試行
+                setTimeout(() => {
+                    this.performLoginSync();
+                }, 5000);
+                return;
+            }
             
             // 現在のローカルデータを保護するため、まずクラウドから最新データを取得
             await this.loadDataFromGoogle();

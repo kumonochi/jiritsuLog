@@ -54,14 +54,41 @@ https://console.cloud.google.com/
 
 このクライアントIDが正しく設定されているか確認してください。
 
+## ❗ 重要：403エラーの解決方法
+
+**現在発生中の問題:**
+```
+GET https://accounts.google.com/o/oauth2/iframerpc?... 403 (Forbidden)
+auth2認証エラー: {type: 'tokenFailed', idpId: 'google', error: 'server_error'}
+```
+
+**必須対処法:**
+
+### 1. OAuth同意画面でテストユーザー追加（最重要）
+1. Google Cloud Console → 「APIとサービス」→「OAuth同意画面」
+2. 画面下部の「テストユーザー」セクション
+3. 「ユーザーを追加」ボタンをクリック
+4. **`fortune.telling18@gmail.com`** を追加
+5. 「保存」をクリック
+
+### 2. アプリケーションの種類を確認
+1. 「認証情報」タブ → OAuth 2.0 クライアントID
+2. アプリケーションの種類：**「ウェブアプリケーション」**
+3. 承認済みの JavaScript 生成元：`https://kumonochi.github.io`
+4. 承認済みのリダイレクト URI：`https://kumonochi.github.io/jiritsuLog/index.html`
+
+### 3. OAuth同意画面の公開ステータス
+- ユーザータイプ：**「外部」**
+- 公開ステータス：**「テスト」**（これで十分）
+
 ## 設定完了後の確認
 1. アプリでGoogleログインを試行
 2. OAuth認証画面で「許可」をクリック
 3. 手動同期が正常に動作することを確認
 
 ## トラブルシューティング
-- 403エラーが継続する場合：OAuth同意画面のテストユーザーに追加されているか確認
-- リダイレクトURIエラー：承認済みリダイレクトURIが正確に設定されているか確認
-- スコープエラー：Google Drive APIが有効化されているか確認
+- **403エラーが継続する場合**：OAuth同意画面のテストユーザーに `fortune.telling18@gmail.com` が追加されているか確認
+- **リダイレクトURIエラー**：承認済みリダイレクトURIが `https://kumonochi.github.io/jiritsuLog/index.html` と完全一致しているか確認
+- **スコープエラー**：Google Drive APIが有効化されているか確認
 
-設定完了まで、アプリのクラウド同期機能は無効化されています。
+**⚠️ テストユーザー追加が最も重要です。これが設定されていないと403エラーが必ず発生します。**
