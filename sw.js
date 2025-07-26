@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jiritsulog-v1';
+const CACHE_NAME = 'jiritsulog-v2'; // バージョンアップでキャッシュクリア
 const urlsToCache = [
     './index.html',
     './styles.css',
@@ -17,38 +17,39 @@ self.addEventListener('install', event => {
     );
 });
 
-// リソース取得時
+// リソース取得時（ネットワーク優先でキャッシュ問題を解決）
 self.addEventListener('fetch', event => {
     event.respondWith(
-        caches.match(event.request)
+        // まずネットワークから取得を試行（常に最新を取得）
+        fetch(event.request)
             .then(response => {
-                // キャッシュにある場合はそれを返す
-                if (response) {
-                    return response;
+                // レスポンスが有効な場合
+                if (response && response.status === 200) {
+                    // レスポンスをクローンしてキャッシュに保存（緊急時用）
+                    const responseToCache = response.clone();
+                    caches.open(CACHE_NAME)
+                        .then(cache => {
+                            cache.put(event.request, responseToCache);
+                        });
                 }
-                
-                // キャッシュにない場合はネットワークから取得
-                return fetch(event.request)
+                return response;
+            })
+            .catch(() => {
+                // ネットワークエラーの場合のみキャッシュを使用
+                return caches.match(event.request)
                     .then(response => {
-                        // レスポンスが有効でない場合はそのまま返す
-                        if (!response || response.status !== 200 || response.type !== 'basic') {
+                        if (response) {
                             return response;
                         }
-
-                        // レスポンスをクローンしてキャッシュに保存
-                        const responseToCache = response.clone();
-                        caches.open(CACHE_NAME)
-                            .then(cache => {
-                                cache.put(event.request, responseToCache);
-                            });
-
-                        return response;
-                    })
-                    .catch(() => {
-                        // ネットワークエラーの場合、基本的なHTML構造を返す
+                        // HTML要求でキャッシュもない場合
                         if (event.request.destination === 'document') {
                             return caches.match('./index.html');
                         }
+                        // その他のリソースは404を返す
+                        return new Response('Network error and no cache available', {
+                            status: 404,
+                            statusText: 'Not Found'
+                        });
                     });
             })
     );

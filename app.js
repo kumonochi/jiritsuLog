@@ -271,9 +271,14 @@ class JiritsuLogApp {
         console.log('認証レスポンス:', response);
         
         try {
-            // JWTトークンをデコード
-            const payload = JSON.parse(atob(response.credential.split('.')[1]));
-            console.log('ユーザー情報:', payload);
+            // JWTトークンを適切にデコード（UTF-8対応）
+            const base64Payload = response.credential.split('.')[1];
+            const decodedPayload = decodeURIComponent(atob(base64Payload).split('').map(function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            const payload = JSON.parse(decodedPayload);
+            
+            this.debugLog('ユーザー情報:', payload);
             
             // ユーザー情報を保存
             this.currentUser = {
@@ -382,10 +387,11 @@ class JiritsuLogApp {
         if ('serviceWorker' in navigator && location.protocol !== 'file:') {
             navigator.serviceWorker.register('./sw.js')
                 .then(registration => {
-                    console.log('Service Worker registered:', registration);
+                    this.swRegistration = registration;
+                    this.debugLog('Service Worker registered:', registration);
                 })
                 .catch(error => {
-                    console.log('Service Worker registration failed:', error);
+                    this.errorLog('Service Worker registration failed:', error);
                 });
         } else if (location.protocol === 'file:') {
             console.log('Service Workerはfile://プロトコルではサポートされていません。HTTPサーバーでアクセスしてください。');
@@ -2135,38 +2141,63 @@ class JiritsuLogApp {
         this.notificationTimers.push(timer);
     }
 
-    showNotification(message) {
+    async showNotification(message) {
         if (Notification.permission === 'granted') {
-            const notification = new Notification('じりつログ', {
-                body: message,
-                icon: './アイコン.png',
-                badge: './アイコン.png',
-                vibrate: [200, 100, 200, 100, 200],
-                tag: 'jiritsu-reminder',
-                requireInteraction: true,
-                actions: [
-                    {
-                        action: 'open',
-                        title: '記録する'
-                    },
-                    {
-                        action: 'close',
-                        title: '後で'
-                    }
-                ]
-            });
-
-            notification.onclick = () => {
-                window.focus();
-                this.showPage('main');
-                notification.close();
-            };
-
-            // 10秒後に自動で閉じる
-            setTimeout(() => {
-                notification.close();
-            }, 10000);
+            // Service Workerが利用可能な場合は、それを使用（actionsサポート）
+            if ('serviceWorker' in navigator && this.swRegistration) {
+                try {
+                    await this.swRegistration.showNotification('じりつログ', {
+                        body: message,
+                        icon: './アイコン.png',
+                        badge: './アイコン.png',
+                        vibrate: [200, 100, 200, 100, 200],
+                        tag: 'jiritsu-reminder',
+                        requireInteraction: true,
+                        actions: [
+                            {
+                                action: 'open',
+                                title: '記録する',
+                                icon: './アイコン.png'
+                            },
+                            {
+                                action: 'close',
+                                title: '後で'
+                            }
+                        ]
+                    });
+                    this.debugLog('Service Worker通知を表示しました');
+                } catch (error) {
+                    this.errorLog('Service Worker通知エラー:', error);
+                    // フォールバック：シンプルな通知
+                    this.showSimpleNotification(message);
+                }
+            } else {
+                // Service Workerが利用不可の場合：シンプルな通知
+                this.showSimpleNotification(message);
+            }
         }
+    }
+    
+    showSimpleNotification(message) {
+        // actionsを使わないシンプルな通知
+        const notification = new Notification('じりつログ', {
+            body: message,
+            icon: './アイコン.png',
+            tag: 'jiritsu-reminder'
+        });
+
+        notification.onclick = () => {
+            window.focus();
+            this.showPage('main');
+            notification.close();
+        };
+        
+        // 10秒後に自動で閉じる
+        setTimeout(() => {
+            notification.close();
+        }, 10000);
+        
+        this.debugLog('シンプル通知を表示しました');
     }
 
     // 実施時間設定機能
@@ -3489,7 +3520,12 @@ class JiritsuLogApp {
     // Google認証レスポンス処理
     async handleCredentialResponse(response) {
         try {
-            const payload = JSON.parse(atob(response.credential.split('.')[1]));
+            // JWTトークンを適切にデコード（UTF-8対応）
+            const base64Payload = response.credential.split('.')[1];
+            const decodedPayload = decodeURIComponent(atob(base64Payload).split('').map(function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            const payload = JSON.parse(decodedPayload);
             
             this.currentUser = {
                 id: payload.sub,
