@@ -1423,6 +1423,39 @@ class JiritsuLogApp {
         this.debugLog('UIの強制リフレッシュ完了');
     }
     
+    // 同期履歴を取得
+    getSyncHistory() {
+        const key = this.getStorageKey('syncHistory');
+        const historyData = localStorage.getItem(key);
+        return historyData ? JSON.parse(historyData) : [];
+    }
+    
+    // 同期履歴を追加
+    addSyncHistory(type, success, message, details = null) {
+        try {
+            const history = this.getSyncHistory();
+            const entry = {
+                timestamp: Date.now(),
+                type: type,
+                success: success,
+                message: message,
+                details: details
+            };
+            
+            history.unshift(entry);
+            
+            // 最大100件まで保持
+            if (history.length > 100) {
+                history.splice(100);
+            }
+            
+            const key = this.getStorageKey('syncHistory');
+            localStorage.setItem(key, JSON.stringify(history));
+        } catch (error) {
+            console.error('同期履歴の追加に失敗:', error);
+        }
+    }
+    
     // Google同期のスケジュール（デバウンス）
     scheduleSyncWithGoogle() {
         // 既存のタイマーをクリア
