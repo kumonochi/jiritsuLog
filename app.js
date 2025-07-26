@@ -184,10 +184,10 @@ class JiritsuLogApp {
                 // アカウント情報復元後にデータを読み込み
                 this.loadUserDataWithAccountInfo();
                 
-                // 自動同期は無効（Google Cloud Console設定が必要なため）
-                // setTimeout(() => {
-                //     this.performLoginSync();
-                // }, 2000);
+                // Google Cloud Console設定完了後、復元時同期を再有効化
+                setTimeout(() => {
+                    this.performLoginSync();
+                }, 2000);
                 
             } catch (error) {
                 console.error('保存されたユーザー情報の復元に失敗:', error);
@@ -381,8 +381,8 @@ class JiritsuLogApp {
             
             console.log('メインユーザー情報UIを更新しました');
             
-            // クラウド同期は手動実行のみに制限（Google Cloud Console設定が必要なため）
-            // this.performLoginSync();
+            // Google Cloud Console設定完了後、自動同期を再有効化
+            this.performLoginSync();
         }
     }
     
@@ -3577,6 +3577,9 @@ class JiritsuLogApp {
                 
                 this.isGoogleApiLoaded = true;
                 console.log('Google API初期化完了');
+                
+                // 設定診断テストを実行
+                await this.testGoogleCloudSetup();
             }
             
             this.initGoogleSignIn();
@@ -3935,11 +3938,21 @@ class JiritsuLogApp {
                             return;
                         }
                     } catch (auth2Error) {
-                        console.warn('auth2認証に失敗:', auth2Error);
+                        this.errorLog('❌ auth2認証エラー:', auth2Error);
+                        
+                        // 詳細なエラー情報をテスト用にログ出力
+                        this.debugLog('認証エラー詳細テスト:', {
+                            error: auth2Error.error,
+                            details: auth2Error.details || 'No details',
+                            type: typeof auth2Error,
+                            clientId: this.GOOGLE_CLIENT_ID
+                        });
                         
                         // 403エラーの場合は具体的なメッセージを表示
                         if (auth2Error.error === 'server_error') {
-                            this.showPopupNotification('Google Cloud Console設定が必要です。設定手順を確認してください。', 'warning');
+                            this.showPopupNotification('❌ 認証サーバーエラー。Google Cloud Console設定（特にテストユーザー）を確認してください。', 'error');
+                        } else {
+                            this.showPopupNotification(`❌ 認証エラー: ${auth2Error.error}`, 'warning');
                         }
                     }
                 }
@@ -4081,19 +4094,26 @@ class JiritsuLogApp {
             manualSyncBtn.removeAttribute('onclick');
             manualSyncBtn.addEventListener('click', async () => {
                 try {
+                    this.debugLog('=== 手動同期テスト開始 ===');
+                    
+                    // まず診断テストを実行
+                    await this.testGoogleCloudSetup();
+                    
                     if (!this.accessToken) {
                         // アクセストークンがない場合は認証フローを開始
-                        this.showPopupNotification('Google Cloud Console設定が完了している場合のみ同期可能です', 'info');
+                        this.showPopupNotification('🔧 認証が必要です。設定テストを実行後、認証を開始します...', 'info');
                         await this.requestAccessToken();
                     } else {
                         // アクセストークンがある場合は直接同期
+                        this.debugLog('既存トークンで同期開始');
                         await this.syncDataWithGoogle();
                         // 同期後、クラウドから最新データを取得
                         await this.loadDataFromGoogle();
+                        this.showPopupNotification('✅ 手動同期が完了しました', 'success');
                     }
                 } catch (error) {
-                    this.errorLog('手動同期エラー:', error);
-                    this.showPopupNotification('同期に失敗しました。Google Cloud Console設定を確認してください。', 'warning');
+                    this.errorLog('❌ 手動同期エラー:', error);
+                    this.showPopupNotification('❌ 同期に失敗しました。コンソールログを確認してください。', 'error');
                 }
             });
         }
@@ -4299,6 +4319,11 @@ class JiritsuLogApp {
     async performLoginSync() {
         try {
             this.debugLog('ログイン後の自動同期開始');
+            this.debugLog('同期開始時の状態:', {
+                isSignedIn: this.isSignedIn,
+                hasAccessToken: !!this.accessToken,
+                currentUser: this.currentUser?.email || 'None'
+            });
             
             // 現在のローカルデータを保護するため、まずクラウドから最新データを取得
             await this.loadDataFromGoogle();
@@ -4306,16 +4331,81 @@ class JiritsuLogApp {
             // その後、現在のデータをクラウドと同期
             if (this.accessToken || this.isSignedIn) {
                 await this.syncDataWithGoogle();
+                this.debugLog('✅ 自動同期が正常に完了しました');
+                this.showPopupNotification('データの同期が完了しました', 'success');
             } else {
                 // アクセストークンがない場合は権限要求
+                this.debugLog('アクセストークンなし - 権限要求開始');
                 await this.requestAccessToken();
             }
             
             this.debugLog('ログイン後の自動同期完了');
         } catch (error) {
             this.errorLog('ログイン後の自動同期エラー:', error);
-            this.showPopupNotification('データの同期に部分的に失敗しました', 'warning');
+            this.showPopupNotification('データの同期に失敗しました。設定を確認してください。', 'warning');
         }
+    }
+    
+    // Google Cloud Console設定診断テスト
+    async testGoogleCloudSetup() {
+        this.debugLog('=== Google Cloud Console設定診断開始 ===');
+        
+        const diagnostics = {
+            timestamp: new Date().toISOString(),
+            environment: {
+                hostname: window.location.hostname,
+                origin: window.location.origin,
+                url: window.location.href,
+                userAgent: navigator.userAgent
+            },
+            configuration: {
+                clientId: this.GOOGLE_CLIENT_ID,
+                scopes: this.SCOPES,
+                discoveryDoc: this.DISCOVERY_DOC
+            },
+            apiAvailability: {
+                gapi: typeof gapi !== 'undefined',
+                googleAccounts: typeof google !== 'undefined' && !!google.accounts,
+                gapiAuth2: typeof gapi !== 'undefined' && !!gapi.auth2,
+                gapiClient: typeof gapi !== 'undefined' && !!gapi.client
+            },
+            currentState: {
+                isSignedIn: this.isSignedIn,
+                hasAccessToken: !!this.accessToken,
+                currentUser: this.currentUser?.email || 'None'
+            }
+        };
+        
+        this.debugLog('診断結果:', diagnostics);
+        
+        // 設定の妥当性チェック
+        const issues = [];
+        
+        if (!this.GOOGLE_CLIENT_ID || this.GOOGLE_CLIENT_ID.length < 50) {
+            issues.push('❌ Client IDが設定されていないか無効です');
+        }
+        
+        if (!diagnostics.apiAvailability.gapi) {
+            issues.push('❌ Google API (gapi) が読み込まれていません');
+        }
+        
+        if (!diagnostics.apiAvailability.googleAccounts) {
+            issues.push('❌ Google Identity Services が読み込まれていません');
+        }
+        
+        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+            issues.push('❌ HTTPS環境が必要です');
+        }
+        
+        if (issues.length > 0) {
+            this.errorLog('設定診断で問題を検出:', issues);
+            this.showPopupNotification(`設定に問題があります: ${issues.join(', ')}`, 'error');
+        } else {
+            this.debugLog('✅ 基本設定は正常です');
+            this.showPopupNotification('✅ 基本設定は正常です。認証テストを実行中...', 'info');
+        }
+        
+        return diagnostics;
     }
     
     // 記録保存時の自動同期
