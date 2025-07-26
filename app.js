@@ -184,10 +184,10 @@ class JiritsuLogApp {
                 // アカウント情報復元後にデータを読み込み
                 this.loadUserDataWithAccountInfo();
                 
-                // 復元後に自動でクラウド同期を確認
-                setTimeout(() => {
-                    this.performLoginSync();
-                }, 2000);
+                // 自動同期は無効（Google Cloud Console設定が必要なため）
+                // setTimeout(() => {
+                //     this.performLoginSync();
+                // }, 2000);
                 
             } catch (error) {
                 console.error('保存されたユーザー情報の復元に失敗:', error);
@@ -381,8 +381,8 @@ class JiritsuLogApp {
             
             console.log('メインユーザー情報UIを更新しました');
             
-            // ログイン後に自動でクラウドデータ同期を実行
-            this.performLoginSync();
+            // クラウド同期は手動実行のみに制限（Google Cloud Console設定が必要なため）
+            // this.performLoginSync();
         }
     }
     
@@ -3936,6 +3936,11 @@ class JiritsuLogApp {
                         }
                     } catch (auth2Error) {
                         console.warn('auth2認証に失敗:', auth2Error);
+                        
+                        // 403エラーの場合は具体的なメッセージを表示
+                        if (auth2Error.error === 'server_error') {
+                            this.showPopupNotification('Google Cloud Console設定が必要です。設定手順を確認してください。', 'warning');
+                        }
                     }
                 }
             }
@@ -3945,7 +3950,7 @@ class JiritsuLogApp {
             
         } catch (error) {
             this.errorLog('アクセストークン取得エラー:', error);
-            this.showPopupNotification('Google Driveへのアクセス権限が必要です。認証画面で許可してください。', 'warning');
+            this.showPopupNotification('クラウド同期にはGoogle Cloud Console設定が必要です。設定完了まで同期機能は利用できません。', 'info');
         } finally {
             // 重複実行防止フラグをリセット
             this.isRequestingToken = false;
@@ -4075,14 +4080,20 @@ class JiritsuLogApp {
             // onclick属性を削除して、イベントリスナーで管理
             manualSyncBtn.removeAttribute('onclick');
             manualSyncBtn.addEventListener('click', async () => {
-                if (!this.accessToken) {
-                    // アクセストークンがない場合は認証フローを開始
-                    await this.requestAccessToken();
-                } else {
-                    // アクセストークンがある場合は直接同期
-                    await this.syncDataWithGoogle();
-                    // 同期後、クラウドから最新データを取得
-                    await this.loadDataFromGoogle();
+                try {
+                    if (!this.accessToken) {
+                        // アクセストークンがない場合は認証フローを開始
+                        this.showPopupNotification('Google Cloud Console設定が完了している場合のみ同期可能です', 'info');
+                        await this.requestAccessToken();
+                    } else {
+                        // アクセストークンがある場合は直接同期
+                        await this.syncDataWithGoogle();
+                        // 同期後、クラウドから最新データを取得
+                        await this.loadDataFromGoogle();
+                    }
+                } catch (error) {
+                    this.errorLog('手動同期エラー:', error);
+                    this.showPopupNotification('同期に失敗しました。Google Cloud Console設定を確認してください。', 'warning');
                 }
             });
         }
@@ -4143,7 +4154,7 @@ class JiritsuLogApp {
         
         // アクセストークンがない場合は取得を試行
         if (!this.accessToken) {
-            this.showPopupNotification('Google Driveへのアクセス権限が必要です', 'warning');
+            this.showPopupNotification('同期機能の利用にはGoogle Cloud Console設定が必要です', 'info');
             await this.requestAccessToken();
             return;
         }
