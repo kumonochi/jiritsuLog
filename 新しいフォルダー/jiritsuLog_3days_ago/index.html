@@ -8,6 +8,8 @@
     <link rel="icon" href="アイコン.png" type="image/png">
     <meta name="theme-color" content="#2980B9">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
 </head>
 <body>
     <div id="app">
@@ -249,6 +251,68 @@
             <div id="records-page" class="page">
                 <h2>記録ノート</h2>
                 
+                <!-- Google連携セクション（目立つ場所） -->
+                <div id="google-sync-banner" class="google-sync-banner" style="
+                    background: linear-gradient(135deg, #4285f4 0%, #34a853 100%);
+                    color: white;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    box-shadow: 0 2px 10px rgba(66, 133, 244, 0.3);
+                ">
+                    <div style="display: flex; align-items: center;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" style="margin-right: 12px;">
+                            <path fill="white" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="white" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="white" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="white" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        <div>
+                            <div style="font-weight: bold; font-size: 16px;">クラウド同期</div>
+                            <div style="font-size: 13px; opacity: 0.9;">Googleアカウントでデータを安全に保存</div>
+                        </div>
+                    </div>
+                    <div id="main-google-auth-container">
+                        <div id="main-google-signin-section">
+                            <div id="main-google-signin-button" style="display: inline-block;"></div>
+                            <button id="manual-google-signin" onclick="app.handleManualGoogleSignin()" style="
+                                display: none;
+                                background: white;
+                                color: #4285f4;
+                                border: none;
+                                padding: 8px 16px;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-weight: 500;
+                                transition: all 0.2s;
+                            " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
+                                🔐 Googleでログイン
+                            </button>
+                        </div>
+                        <div id="main-google-user-info" style="display: none;">
+                            <div style="display: flex; align-items: center;">
+                                <img id="main-user-picture" style="width: 32px; height: 32px; border-radius: 50%; margin-right: 8px;" alt="User">
+                                <div>
+                                    <div id="main-user-name" style="font-weight: 500; font-size: 14px;"></div>
+                                    <div style="font-size: 12px; opacity: 0.8;">同期済み</div>
+                                </div>
+                                <button id="main-google-signout" onclick="app.handleGoogleSignout()" style="
+                                    background: rgba(255,255,255,0.2);
+                                    color: white;
+                                    border: 1px solid rgba(255,255,255,0.3);
+                                    padding: 4px 8px;
+                                    border-radius: 4px;
+                                    cursor: pointer;
+                                    font-size: 12px;
+                                    margin-left: 12px;
+                                ">ログアウト</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 
                 <div class="tabs">
                     <button class="tab-btn active" data-tab="list">記録一覧</button>
@@ -257,13 +321,11 @@
                 
                 <div id="list-tab" class="tab-content active">
                     <div class="records-list">
-                        <div class="list-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="list-header">
                             <h3>練習記録</h3>
-                            <div style="display: flex; gap: 10px;">
-                                <button id="import-csv-btn" class="export-btn">CSVインポート</button>
-                                <button id="export-csv" class="export-btn">CSV出力</button>
-                                <input type="file" id="import-csv" accept=".csv" style="display: none;">
-                            </div>
+                            <button id="export-csv" class="export-btn">CSV出力</button>
+                            <input type="file" id="import-csv" accept=".csv" style="display: none;">
+                            <button id="import-csv-btn" class="export-btn">CSVインポート</button>
                         </div>
                         <div id="records-container" class="records-container">
                             <!-- 記録一覧がここに表示される -->
@@ -443,6 +505,29 @@
                         <button id="enable-notifications" class="notification-btn">通知を有効にする</button>
                     </div>
                     
+                    <div class="setting-group">
+                        <h3>アカウント連携</h3>
+                        <div class="google-auth-section">
+                            <div id="google-signin-section" class="auth-section">
+                                <p>Googleアカウントと連携してデータを安全にクラウド保存できます</p>
+                                <div id="google-signin-button" class="google-signin-btn"></div>
+                            </div>
+                            <div id="google-user-info" class="user-info-section" style="display: none;">
+                                <div class="user-profile">
+                                    <img id="user-picture" class="user-avatar" src="" alt="User Avatar">
+                                    <div class="user-details">
+                                        <span id="user-name" class="user-name"></span>
+                                        <span id="user-email" class="user-email"></span>
+                                    </div>
+                                </div>
+                                <div class="sync-status">
+                                    <span id="sync-status" class="sync-indicator">同期済み</span>
+                                    <button id="manual-sync" class="sync-btn">手動同期</button>
+                                </div>
+                                <button id="google-signout" class="signout-btn">ログアウト</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -461,9 +546,6 @@
                         <li>深刻なバグ、よりよい改善案を見つけた場合には以下のアドレスまでご連絡ください。<br>
                             fortune.telling18@gmail.com</li>
                     </ul>
-                    <div style="text-align: center; margin-top: 30px; padding: 10px; background-color: #f8f9fa; border-radius: 8px; color: #6c757d;">
-                        <small>ver 0.48 - 詳細診断・代替認証機能追加版 (Updated: 2025-01-26)</small>
-                    </div>
                 </div>
             </div>
         </main>

@@ -11,76 +11,18 @@ class JiritsuLogApp {
         this.isStopwatchRunning = false;
         this.lapTimes = [];
         
-        // Google API関連
-        this.isGoogleApiLoaded = false;
+        // デバッグ
+        this.debugMode = true;
+        
+        // Google関連プロパティは無効化
         this.isSignedIn = false;
         this.currentUser = null;
-        this.accessToken = null; // アクセストークンを保存
-        this.GOOGLE_CLIENT_ID = '47690741133-c4pbiefj90me73dflkla5q3ie67nbqdl.apps.googleusercontent.com'; // 後で設定が必要
-        this.DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-        this.SCOPES = 'https://www.googleapis.com/auth/drive.file';
-        
-        // 環境検出とデバッグ
-        this.debugMode = true;
-        this.environment = this.detectEnvironment();
-        this.debugLog('環境検出結果:', this.environment);
-        
-        // 重複実行防止フラグ
-        this.isRequestingToken = false;
-        this.isSyncing = false;
+        this.accessToken = null;
+        this.environment = { supportedByGoogleAuth: false };
         
         this.init();
     }
 
-    // 環境検出
-    detectEnvironment() {
-        const hostname = window.location.hostname;
-        const protocol = window.location.protocol;
-        const port = window.location.port;
-        const origin = window.location.origin;
-        
-        let environment = {
-            hostname: hostname,
-            protocol: protocol,
-            port: port,
-            origin: origin,
-            isLocal: false,
-            isGitHubPages: false,
-            isHTTPS: protocol === 'https:',
-            supportedByGoogleAuth: false
-        };
-        
-        // ローカル環境の検出
-        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '' || protocol === 'file:') {
-            environment.isLocal = true;
-        }
-        
-        // GitHub Pagesの検出
-        if (hostname.includes('github.io')) {
-            environment.isGitHubPages = true;
-        }
-        
-        // Google認証でサポートされている環境かチェック
-        const supportedOrigins = [
-            'https://kumonochi.github.io',
-            'http://localhost:3000',
-            'http://localhost:8000', 
-            'http://localhost:5000',
-            'http://127.0.0.1:3000',
-            'http://127.0.0.1:8000',
-            'http://127.0.0.1:5000'
-        ];
-        
-        // file://プロトコル、またはサポートされているoriginの場合は有効
-        environment.supportedByGoogleAuth = supportedOrigins.includes(origin) || protocol === 'file:';
-        
-        // file://プロトコルの場合は特別な処理が必要
-        if (protocol === 'file:') {
-            environment.requiresSpecialHandling = true;
-        }
-        
-        return environment;
-    }
     
     // デバッグログ出力
     debugLog(message, ...args) {
@@ -101,38 +43,6 @@ class JiritsuLogApp {
         this.showPopupNotification(`警告: ${message}`, 'warning');
     }
     
-    // 環境警告表示
-    showEnvironmentWarning() {
-        const warningHtml = `
-            <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                <h4 style="color: #856404; margin: 0 0 10px 0;">⚠️ Google認証環境エラー</h4>
-                <p style="color: #856404; margin: 0;">
-                    現在の環境 (${this.environment.origin}) はGoogle OAuth認証でサポートされていません。<br>
-                    以下のいずれかの環境で実行してください：
-                </p>
-                <ul style="color: #856404; margin: 10px 0 0 20px;">
-                    <li>https://kumonochi.github.io（GitHub Pages）</li>
-                    <li>http://localhost:3000, 8000, 5000</li>
-                    <li>http://127.0.0.1:3000, 8000, 5000</li>
-                </ul>
-                <p style="color: #856404; margin: 10px 0 0 0; font-size: 12px;">
-                    デバッグ情報: ${JSON.stringify(this.environment, null, 2)}
-                </p>
-            </div>
-        `;
-        
-        // Google認証セクションに警告を表示
-        const authSection = document.getElementById('google-signin-section');
-        if (authSection) {
-            authSection.innerHTML = warningHtml;
-        }
-        
-        // メイン認証セクションにも警告を表示
-        const mainAuthSection = document.getElementById('main-google-signin-section');
-        if (mainAuthSection) {
-            mainAuthSection.innerHTML = warningHtml;
-        }
-    }
 
     init() {
         // DOM読み込み完了を待ってから初期化
@@ -149,66 +59,22 @@ class JiritsuLogApp {
         console.log('=== アプリ初期化開始 ===');
         console.log('DOM ready state:', document.readyState);
         
-        // 基本的な初期化（データ読み込みは除く）
+        // 基本的な初期化
         this.setupEventListeners();
         this.updateSessionNumber();
         this.setCurrentDateTime();
         this.registerServiceWorker();
         this.setupVoiceRecognition();
         
-        // Googleアカウント情報を先に復元してからデータを読み込み
-        this.restoreGoogleAccountInfo();
-        
-        // Google API初期化は少し遅延させる
-        setTimeout(() => {
-            // HTML要素の存在確認
-            this.debugDOMElements();
-            // Google API初期化（遅延実行）
-            this.waitForGoogleApiAndInit();
-            // 新しいメインGoogle連携も初期化
-            this.initMainGoogleAuth();
-        }, 100);
+        // データを読み込み
+        this.loadUserData();
     }
     
-    // Googleアカウント情報を最初に復元
-    restoreGoogleAccountInfo() {
-        this.debugLog('Googleアカウント情報の復元を開始');
+    // データ読み込み
+    loadUserData() {
+        this.debugLog('データ読み込み開始');
         
-        const savedUser = localStorage.getItem('googleUser');
-        if (savedUser) {
-            try {
-                this.currentUser = JSON.parse(savedUser);
-                this.isSignedIn = true;
-                this.debugLog('保存されたGoogle認証情報を復元:', this.currentUser);
-                
-                // アカウント情報復元後にデータを読み込み
-                this.loadUserDataWithAccountInfo();
-                
-                // Google Cloud Console設定完了後、復元時同期を再有効化
-                setTimeout(() => {
-                    this.performLoginSync();
-                }, 2000);
-                
-            } catch (error) {
-                console.error('保存されたユーザー情報の復元に失敗:', error);
-                localStorage.removeItem('googleUser');
-                
-                // アカウント情報がない場合のデータ読み込み
-                this.loadUserDataWithAccountInfo();
-            }
-        } else {
-            this.debugLog('保存されたアカウント情報がありません');
-            
-            // アカウント情報がない場合のデータ読み込み
-            this.loadUserDataWithAccountInfo();
-        }
-    }
-    
-    // アカウント情報を考慮したデータ読み込み
-    loadUserDataWithAccountInfo() {
-        this.debugLog('アカウント情報を考慮したデータ読み込み開始');
-        
-        // アカウント別のデータを読み込み
+        // データを読み込み
         this.records = this.loadRecords();
         this.settings = this.loadSettings();
         
@@ -217,260 +83,18 @@ class JiritsuLogApp {
         this.loadDurationSettings();
         this.displayRecords();
         
-        this.debugLog('アカウント情報を考慮したデータ読み込み完了:', {
-            isSignedIn: this.isSignedIn,
-            currentUser: this.currentUser?.name || 'None',
-            recordsCount: this.records.length,
-            storageKey: this.getStorageKey('records')
+        this.debugLog('データ読み込み完了:', {
+            recordsCount: this.records.length
         });
     }
     
-    // メインGoogle認証セクションの初期化
-    initMainGoogleAuth() {
-        console.log('=== メインGoogle認証初期化開始 ===');
-        
-        // アカウント情報は既に復元済みなのでUIの更新のみ実行
-        if (this.isSignedIn && this.currentUser) {
-            this.debugLog('アカウント情報が既に復元済みです:', this.currentUser);
-            this.updateMainUserInfo(this.currentUser);
-        } else {
-            this.debugLog('アカウント情報がありません');
-        }
-        
-        // 3秒後に初期化（DOM要素とGoogle APIの準備完了を待つ）
-        setTimeout(() => {
-            this.setupMainGoogleSignin();
-            
-            // ユーザー情報が既にある場合はUIを更新
-            if (this.currentUser && this.isSignedIn) {
-                setTimeout(() => {
-                    this.updateMainUserInfo(this.currentUser);
-                }, 1000);
-            }
-        }, 3000);
-    }
     
-    // メインGoogle連携ボタンのセットアップ
-    setupMainGoogleSignin() {
-        this.debugLog('メインGoogle連携ボタンセットアップ開始');
-        
-        // 環境チェック
-        if (!this.environment.supportedByGoogleAuth) {
-            this.warnLog('現在の環境ではGoogle認証がサポートされていません');
-            this.showEnvironmentWarning();
-            return;
-        }
-        
-        const mainButton = document.getElementById('main-google-signin-button');
-        const manualButton = document.getElementById('manual-google-signin');
-        
-        if (!mainButton) {
-            this.debugLog('メインGoogle連携ボタン要素が見つかりません');
-            return;
-        }
-        
-        this.debugLog('メインGoogle連携ボタン要素確認:', mainButton);
-        
-        // Google APIが利用可能かチェック
-        if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
-            try {
-                this.debugLog('Google Identity Services利用可能 - メインボタンをレンダリング');
-                
-                // Google Identity Services初期化
-                google.accounts.id.initialize({
-                    client_id: this.GOOGLE_CLIENT_ID,
-                    callback: this.handleMainCredentialResponse.bind(this),
-                    auto_select: false,
-                    cancel_on_tap_outside: true
-                });
-                
-                // メインボタンをレンダリング
-                google.accounts.id.renderButton(mainButton, {
-                    theme: 'filled_white',
-                    size: 'medium',
-                    text: 'signin',
-                    locale: 'ja',
-                    width: '200'
-                });
-                
-                this.debugLog('✅ メインGoogleボタンのレンダリング完了');
-                
-            } catch (error) {
-                this.errorLog('メインGoogleボタンレンダリングエラー:', error);
-                this.showManualButton();
-            }
-        } else {
-            this.debugLog('Google Identity Services未利用可能 - 手動ボタンを表示');
-            this.showManualButton();
-        }
-        
-        // 5秒後にフォールバック確認
-        setTimeout(() => {
-            if (mainButton.innerHTML.trim() === '' && manualButton) {
-                console.log('メインボタンが空のため手動ボタンを表示');
-                this.showManualButton();
-            }
-        }, 5000);
-    }
     
-    // 手動ボタンを表示
-    showManualButton() {
-        const manualButton = document.getElementById('manual-google-signin');
-        if (manualButton) {
-            manualButton.style.display = 'inline-block';
-            this.debugLog('手動Googleサインインボタンを表示しました');
-        }
-    }
     
-    // メイン認証レスポンス処理
-    handleMainCredentialResponse(response) {
-        console.log('=== メイン認証レスポンス受信 ===');
-        console.log('認証レスポンス:', response);
-        
-        try {
-            // JWTトークンを適切にデコード（UTF-8対応）
-            const base64Payload = response.credential.split('.')[1];
-            const decodedPayload = decodeURIComponent(atob(base64Payload).split('').map(function(c) {
-                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-            }).join(''));
-            const payload = JSON.parse(decodedPayload);
-            
-            this.debugLog('ユーザー情報:', payload);
-            
-            // ユーザー情報を保存
-            this.currentUser = {
-                name: payload.name,
-                email: payload.email,
-                picture: payload.picture,
-                sub: payload.sub
-            };
-            
-            // UIを更新
-            this.updateMainUserInfo(this.currentUser);
-            
-            // ログイン状態を保存
-            this.isSignedIn = true;
-            localStorage.setItem('googleUser', JSON.stringify(this.currentUser));
-            
-            // アカウント別データを再読み込み
-            this.loadUserDataAfterLogin();
-            
-            this.showPopupNotification('✅ Googleアカウントでログインしました', 'success');
-            
-        } catch (error) {
-            console.error('認証レスポンス処理エラー:', error);
-            this.showPopupNotification('❌ ログイン処理でエラーが発生しました', 'error');
-        }
-    }
     
-    // メインユーザー情報UIの更新
-    updateMainUserInfo(user) {
-        const signinSection = document.getElementById('main-google-signin-section');
-        const userInfoSection = document.getElementById('main-google-user-info');
-        const userPicture = document.getElementById('main-user-picture');
-        const userName = document.getElementById('main-user-name');
-        
-        if (signinSection && userInfoSection && userPicture && userName) {
-            // サインインセクションを非表示
-            signinSection.style.display = 'none';
-            
-            // ユーザー情報を表示
-            userInfoSection.style.display = 'block';
-            userPicture.src = user.picture || '';
-            userName.textContent = user.name || user.email || 'ユーザー';
-            
-            console.log('メインユーザー情報UIを更新しました');
-            
-            // Google Cloud Console設定完了後、自動同期を再有効化
-            this.performLoginSync();
-        }
-    }
     
-    // 手動Googleサインイン処理
-    handleManualGoogleSignin() {
-        this.debugLog('手動Googleサインインが実行されました');
-        
-        // OAuth設定の警告を表示
-        this.showOAuthWarning();
-        
-        // 設定確認
-        this.checkGoogleApiConfiguration();
-        
-        // OAuth2フローを開始
-        this.requestAccessToken();
-    }
     
-    // OAuth設定警告を表示
-    showOAuthWarning() {
-        const warningMessage = `
-            <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                <h4 style="color: #856404; margin: 0 0 10px 0;">⚠️ Google OAuth設定について</h4>
-                <p style="color: #856404; margin: 0 0 10px 0;">
-                    現在、このアプリはGoogle認証の審査プロセス中のため、以下の制限があります：
-                </p>
-                <ul style="color: #856404; margin: 0 0 10px 20px;">
-                    <li>「このアプリは未確認です」の警告が表示される可能性があります</li>
-                    <li>テストユーザーとして登録されたアカウントのみ利用可能です</li>
-                    <li>Google Drive同期機能に制限があります</li>
-                </ul>
-                <p style="color: #856404; margin: 0; font-size: 12px;">
-                    それでも続行する場合は、認証画面で「詳細」→「安全でないページに移動」を選択してください。
-                </p>
-            </div>
-        `;
-        
-        // 一時的にページに警告を表示
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = warningMessage;
-        tempDiv.style.position = 'fixed';
-        tempDiv.style.top = '20px';
-        tempDiv.style.left = '20px';
-        tempDiv.style.right = '20px';
-        tempDiv.style.zIndex = '10000';
-        tempDiv.style.maxWidth = '600px';
-        tempDiv.style.margin = '0 auto';
-        
-        document.body.appendChild(tempDiv);
-        
-        // 10秒後に自動削除
-        setTimeout(() => {
-            if (tempDiv.parentNode) {
-                tempDiv.parentNode.removeChild(tempDiv);
-            }
-        }, 10000);
-        
-        this.showPopupNotification('OAuth認証の注意事項を確認してください', 'warning');
-    }
     
-    // Googleサインアウト処理
-    handleGoogleSignout() {
-        console.log('Googleサインアウト実行');
-        
-        // Google Identity Servicesサインアウト
-        if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
-            google.accounts.id.disableAutoSelect();
-        }
-        
-        // 状態をリセット
-        this.isSignedIn = false;
-        this.currentUser = null;
-        this.accessToken = null;
-        
-        // ローカルストレージをクリア
-        localStorage.removeItem('googleUser');
-        localStorage.removeItem('googleAccessToken');
-        
-        // UIを更新
-        const signinSection = document.getElementById('main-google-signin-section');
-        const userInfoSection = document.getElementById('main-google-user-info');
-        
-        if (signinSection && userInfoSection) {
-            signinSection.style.display = 'block';
-            userInfoSection.style.display = 'none';
-        }
-        
-        this.showPopupNotification('✅ ログアウトしました', 'success');
-    }
     
     // デバッグ用DOM要素確認
     debugDOMElements() {
@@ -586,8 +210,6 @@ class JiritsuLogApp {
             this.importCSV(e);
         });
         
-        // Google認証関連のイベントリスナー
-        this.setupGoogleAuthListeners();
     }
 
     setupTimerEventListeners() {
@@ -1351,10 +973,6 @@ class JiritsuLogApp {
         localStorage.setItem(key, JSON.stringify(this.records));
         this.debugLog('記録データを保存:', key);
         
-        // Google同期が有効の場合は自動同期をスケジュール
-        if (this.isSignedIn && this.accessToken) {
-            this.scheduleSyncWithGoogle();
-        }
     }
 
     loadRecords() {
@@ -1378,10 +996,6 @@ class JiritsuLogApp {
         localStorage.setItem(key, JSON.stringify(this.settings));
         this.debugLog('設定データを保存:', key);
         
-        // Google同期が有効の場合は自動同期をスケジュール
-        if (this.isSignedIn && this.accessToken) {
-            this.scheduleSyncWithGoogle();
-        }
     }
 
     loadSettings() {
@@ -1402,19 +1016,10 @@ class JiritsuLogApp {
         return settings;
     }
     
-    // アカウント別のストレージキーを生成
+    // ストレージキーを生成
     getStorageKey(type) {
         const baseKey = `jiritsulog_${type}`;
-        
-        // Googleアカウントでログイン済みの場合はユーザーID付きキー
-        if (this.isSignedIn && this.currentUser && this.currentUser.sub) {
-            const accountKey = `${baseKey}_${this.currentUser.sub}`;
-            this.debugLog(`アカウント別キー生成: ${accountKey} (User: ${this.currentUser.name})`);
-            return accountKey;
-        }
-        
-        // 未ログインの場合はデフォルトキー
-        this.debugLog(`デフォルトキー生成: ${baseKey}`);
+        this.debugLog(`ストレージキー生成: ${baseKey}`);
         return baseKey;
     }
     
@@ -1472,46 +1077,7 @@ class JiritsuLogApp {
         }
     }
     
-    // Google同期のスケジュール（デバウンス）
-    scheduleSyncWithGoogle() {
-        // 既存のタイマーをクリア
-        if (this.syncScheduleTimer) {
-            clearTimeout(this.syncScheduleTimer);
-        }
-        
-        // 3秒後に同期実行（連続変更時のデバウンス）
-        this.syncScheduleTimer = setTimeout(() => {
-            if (this.isSignedIn && this.accessToken) {
-                this.syncDataWithGoogle();
-            }
-        }, 3000);
-    }
     
-    // ログイン後のユーザーデータ読み込み（新規ログイン時のみ）
-    loadUserDataAfterLogin() {
-        this.debugLog('新規ログイン後のデータ再読み込み開始');
-        
-        // 既存のデータをクリアして新しいアカウントのデータを読み込み
-        this.records = this.loadRecords();
-        this.settings = this.loadSettings();
-        
-        // UIを完全に更新
-        this.displayRecords();
-        this.loadUserSettings();
-        this.loadDurationSettings();
-        
-        // ページをリフレッシュして新しいアカウントのデータを確実に表示
-        this.forceUIRefresh();
-        
-        this.debugLog('新規ログイン後のデータ再読み込み完了:', {
-            recordsCount: this.records.length,
-            settings: Object.keys(this.settings),
-            storageKey: this.getStorageKey('records')
-        });
-        
-        this.addSyncHistory('アカウント連携', true, `${this.currentUser.name}のデータを読み込みました`, `記録: ${this.records.length}件`);
-        this.showPopupNotification(`${this.currentUser.name}のデータを読み込みました`, 'success');
-    }
 
     loadUserSettings() {
         // フォント設定を適用
@@ -3487,142 +3053,8 @@ class JiritsuLogApp {
         }, 3000);
     }
     
-    // Google API待機と初期化（改善版）
-    waitForGoogleApiAndInit() {
-        console.log('=== Google API待機開始 ===');
-        let attempts = 0;
-        const maxAttempts = 30; // 15秒待機
-        
-        const checkAndInit = () => {
-            attempts++;
-            console.log(`Google API確認中 (${attempts}/${maxAttempts})`);
-            
-            const gapiReady = typeof gapi !== 'undefined';
-            const googleReady = typeof google !== 'undefined' && google.accounts && google.accounts.id;
-            
-            console.log('gapi利用可能:', gapiReady);
-            console.log('google.accounts利用可能:', googleReady);
-            
-            if (gapiReady && googleReady) {
-                console.log('✅ すべてのGoogle APIが利用可能です');
-                this.initGoogleApi();
-            } else if (attempts < maxAttempts) {
-                setTimeout(checkAndInit, 500);
-            } else {
-                console.warn('⚠️ Google API読み込みタイムアウト - フォールバック機能を有効化');
-                this.initGoogleSignIn(); // フォールバック機能のみ実行
-            }
-        };
-        
-        // 1秒後に開始（DOM要素が準備完了するのを待つ）
-        setTimeout(checkAndInit, 1000);
-    }
     
-    // Google API 初期化
-    async initGoogleApi() {
-        try {
-            // デバッグ情報を表示
-            this.debugLog('Google API初期化開始');
-            this.debugLog('Client ID:', this.GOOGLE_CLIENT_ID);
-            this.debugLog('現在の環境:', this.environment);
-            this.debugLog('gapi利用可能:', typeof gapi !== 'undefined');
-            this.debugLog('google利用可能:', typeof google !== 'undefined');
-            
-            // 環境チェック
-            if (!this.environment.supportedByGoogleAuth) {
-                this.warnLog(`現在の環境 (${this.environment.origin}) はGoogle認証でサポートされていません`);
-                this.showEnvironmentWarning();
-                return;
-            }
-            
-            await new Promise((resolve) => {
-                if (typeof gapi !== 'undefined') {
-                    gapi.load('client', resolve);
-                } else {
-                    // Google APIが読み込まれるまで待機
-                    const checkGapi = setInterval(() => {
-                        if (typeof gapi !== 'undefined') {
-                            clearInterval(checkGapi);
-                            gapi.load('client', resolve);
-                        }
-                    }, 100);
-                    
-                    // 10秒後にタイムアウト
-                    setTimeout(() => {
-                        clearInterval(checkGapi);
-                        console.error('Google API読み込みタイムアウト');
-                        this.showFallbackSignInButton();
-                        resolve();
-                    }, 10000);
-                }
-            });
-
-            if (typeof gapi !== 'undefined') {
-                await gapi.client.init({
-                    discoveryDocs: [this.DISCOVERY_DOC],
-                });
-                
-                // OAuth 2.0も初期化
-                try {
-                    await gapi.load('auth2', () => {
-                        gapi.auth2.init({
-                            client_id: this.GOOGLE_CLIENT_ID,
-                            scope: this.SCOPES
-                        });
-                    });
-                    console.log('OAuth 2.0初期化完了');
-                } catch (authError) {
-                    console.warn('OAuth 2.0初期化に失敗:', authError);
-                }
-                
-                this.isGoogleApiLoaded = true;
-                console.log('Google API初期化完了');
-                
-                // 設定診断テストを実行
-                await this.testGoogleCloudSetup();
-            }
-            
-            this.initGoogleSignIn();
-        } catch (error) {
-            console.error('Google API初期化エラー:', error);
-            this.showFallbackSignInButton();
-        }
-    }
     
-    // Google サインイン初期化
-    initGoogleSignIn() {
-        console.log('=== Google サインイン初期化開始 ===');
-        
-        // DOM要素の存在確認（より詳細な確認）
-        const checkElement = () => {
-            const buttonElement = document.getElementById('google-signin-button');
-            const settingsPage = document.getElementById('settings-page');
-            const googleAuthSection = document.querySelector('.google-auth-section');
-            
-            console.log('設定ページ:', settingsPage);
-            console.log('Google認証セクション:', googleAuthSection);
-            console.log('google-signin-button要素:', buttonElement);
-            console.log('要素の親:', buttonElement?.parentElement);
-            console.log('要素のスタイル:', buttonElement ? window.getComputedStyle(buttonElement).display : 'なし');
-            
-            return buttonElement;
-        };
-        
-        // すぐにボタンレンダリングを試行（APIが既に利用可能な場合）
-        this.tryRenderGoogleButton();
-        
-        // 3秒後にフォールバックボタンも表示（保険）
-        setTimeout(() => {
-            const buttonElement = document.getElementById('google-signin-button');
-            if (buttonElement) {
-                this.addFallbackButton(buttonElement);
-                if (buttonElement.innerHTML.trim() === '') {
-                    console.log('3秒経過後もボタンが空なので強制表示');
-                    this.showFallbackSignInButton();
-                }
-            }
-        }, 3000);
-    }
     
     // Googleボタンレンダリングを試行
     tryRenderGoogleButton() {
@@ -4166,16 +3598,6 @@ class JiritsuLogApp {
             });
         }
         
-        // 手動Googleサインインリンク
-        const manualSigninLink = document.getElementById('manual-google-signin');
-        if (manualSigninLink) {
-            // onclick属性を削除して、イベントリスナーで管理
-            manualSigninLink.removeAttribute('onclick');
-            manualSigninLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.handleManualGoogleSignin();
-            });
-        }
         
         // 同期履歴ボタン
         const syncHistoryBtn = document.getElementById('sync-history-btn');
