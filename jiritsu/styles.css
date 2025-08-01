@@ -1305,6 +1305,90 @@ h2 {
     font-size: 0.9rem;
 }
 
+/* アップデート通知 */
+.update-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, #3498DB, #2980B9);
+    color: white;
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(52, 152, 219, 0.3);
+    z-index: 10000;
+    max-width: 350px;
+    animation: slideInRight 0.3s ease-out;
+}
+
+.update-content {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.update-content span {
+    flex: 1;
+    min-width: 200px;
+    font-weight: bold;
+}
+
+.update-btn, .dismiss-btn {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 8px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.update-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: translateY(-1px);
+}
+
+.dismiss-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* モバイル対応 */
+@media (max-width: 480px) {
+    .update-notification {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+    
+    .update-content {
+        flex-direction: column;
+        gap: 10px;
+        text-align: center;
+    }
+    
+    .update-content span {
+        min-width: auto;
+    }
+    
+    .update-btn, .dismiss-btn {
+        width: 100%;
+        margin: 5px 0;
+    }
+}
+
 /* 注意事項画面 */
 .notices-content {
     background: white;

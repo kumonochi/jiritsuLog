@@ -129,13 +129,60 @@ class JiritsuLogApp {
                 .then(registration => {
                     this.swRegistration = registration;
                     this.debugLog('Service Worker registered:', registration);
+                    
+                    // Service Worker更新チェック
+                    registration.addEventListener('updatefound', () => {
+                        const newWorker = registration.installing;
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                console.log('新しいService Workerが利用可能です');
+                                this.showUpdateNotification();
+                            }
+                        });
+                    });
                 })
                 .catch(error => {
                     this.errorLog('Service Worker registration failed:', error);
                 });
+            
+            // Service Workerからのメッセージを受信
+            navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data && event.data.type === 'SW_UPDATED') {
+                    console.log('Service Worker更新通知:', event.data.message);
+                    this.showUpdateNotification();
+                }
+            });
         } else if (location.protocol === 'file:') {
             console.log('Service Workerはfile://プロトコルではサポートされていません。HTTPサーバーでアクセスしてください。');
         }
+    }
+    
+    // アップデート通知を表示
+    showUpdateNotification() {
+        // 既存の通知があれば削除
+        const existingNotification = document.querySelector('.update-notification');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+        
+        const notification = document.createElement('div');
+        notification.className = 'update-notification';
+        notification.innerHTML = `
+            <div class="update-content">
+                <span>🔄 新しいバージョンが利用可能です</span>
+                <button onclick="window.location.reload()" class="update-btn">更新</button>
+                <button onclick="this.parentElement.parentElement.remove()" class="dismiss-btn">後で</button>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // 15秒後に自動で消す
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.remove();
+            }
+        }, 15000);
     }
 
     setupEventListeners() {
