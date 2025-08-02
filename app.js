@@ -4834,6 +4834,11 @@ class JiritsuLogApp {
     // Googleドライブからデータをダウンロード
     async downloadDataFromGoogle() {
         try {
+            // 認証チェック
+            if (!this.isSignedIn || !this.accessToken) {
+                throw new Error('Google認証が必要です');
+            }
+
             // 専用フォルダを作成してそこにファイルを保存する方式に変更
             const folderId = await this.getOrCreateJiritsuFolder();
             
@@ -4848,7 +4853,17 @@ class JiritsuLogApp {
             );
             
             if (!searchResponse.ok) {
-                if (searchResponse.status === 403) {
+                if (searchResponse.status === 401) {
+                    // 認証エラーの場合は再認証を試行
+                    this.debugLog('認証エラー：再認証を試行します');
+                    const authSuccess = await this.refreshAuthenticationSilently();
+                    if (authSuccess) {
+                        // 再認証成功時は再試行
+                        return await this.downloadDataFromGoogle();
+                    } else {
+                        throw new Error('認証が失効しました。再度ログインしてください。');
+                    }
+                } else if (searchResponse.status === 403) {
                     throw new Error('Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。');
                 }
                 throw new Error(`ファイル検索に失敗しました (${searchResponse.status})`);
@@ -4871,6 +4886,15 @@ class JiritsuLogApp {
                 
                 if (downloadResponse.ok) {
                     return await downloadResponse.json();
+                } else if (downloadResponse.status === 401) {
+                    // 認証エラーの場合は再認証を試行
+                    const authSuccess = await this.refreshAuthenticationSilently();
+                    if (authSuccess) {
+                        // 再認証成功時は再試行
+                        return await this.downloadDataFromGoogle();
+                    } else {
+                        throw new Error('認証が失効しました。再度ログインしてください。');
+                    }
                 } else if (downloadResponse.status === 403) {
                     throw new Error('Google Drive APIへのアクセス権限がありません。');
                 }
@@ -4880,6 +4904,12 @@ class JiritsuLogApp {
             return null;
         } catch (error) {
             this.errorLog('データダウンロードエラー:', error);
+            
+            // 認証関連エラーの場合はサインアウト状態にする
+            if (error.message.includes('認証') || error.message.includes('ログイン')) {
+                this.handleAuthenticationError();
+            }
+            
             throw error;
         }
     }
@@ -4887,6 +4917,11 @@ class JiritsuLogApp {
     // Googleドライブにデータをアップロード
     async uploadDataToGoogle() {
         try {
+            // 認証チェック
+            if (!this.isSignedIn || !this.accessToken) {
+                throw new Error('Google認証が必要です');
+            }
+
             const data = {
                 records: this.records,
                 settings: this.settings,
@@ -4909,7 +4944,17 @@ class JiritsuLogApp {
             );
             
             if (!searchResponse.ok) {
-                if (searchResponse.status === 403) {
+                if (searchResponse.status === 401) {
+                    // 認証エラーの場合は再認証を試行
+                    this.debugLog('認証エラー：再認証を試行します');
+                    const authSuccess = await this.refreshAuthenticationSilently();
+                    if (authSuccess) {
+                        // 再認証成功時は再試行
+                        return await this.uploadDataToGoogle();
+                    } else {
+                        throw new Error('認証が失効しました。再度ログインしてください。');
+                    }
+                } else if (searchResponse.status === 403) {
                     throw new Error('Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。');
                 }
                 throw new Error(`ファイル検索に失敗しました (${searchResponse.status})`);
@@ -4956,7 +5001,16 @@ class JiritsuLogApp {
             });
             
             if (!uploadResponse.ok) {
-                if (uploadResponse.status === 403) {
+                if (uploadResponse.status === 401) {
+                    // 認証エラーの場合は再認証を試行
+                    const authSuccess = await this.refreshAuthenticationSilently();
+                    if (authSuccess) {
+                        // 再認証成功時は再試行
+                        return await this.uploadDataToGoogle();
+                    } else {
+                        throw new Error('認証が失効しました。再度ログインしてください。');
+                    }
+                } else if (uploadResponse.status === 403) {
                     throw new Error('Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。');
                 }
                 throw new Error(`データアップロードに失敗しました (${uploadResponse.status})`);
@@ -4966,6 +5020,12 @@ class JiritsuLogApp {
             
         } catch (error) {
             this.errorLog('データアップロードエラー:', error);
+            
+            // 認証関連エラーの場合はサインアウト状態にする
+            if (error.message.includes('認証') || error.message.includes('ログイン')) {
+                this.handleAuthenticationError();
+            }
+            
             throw error;
         }
     }
@@ -5156,6 +5216,22 @@ class JiritsuLogApp {
     // じりつログ専用フォルダを取得または作成
     async getOrCreateJiritsuFolder() {
         try {
+            // トークンの有効性を確認
+            if (!this.accessToken) {
+                throw new Error('アクセストークンがありません');
+            }
+
+            // トークンが有効かチェック
+            const isTokenValid = await this.validateAccessToken();
+            if (!isTokenValid) {
+                // トークンが無効な場合は再認証を試行
+                this.debugLog('アクセストークンが無効です。再認証を試行します');
+                await this.refreshAuthenticationSilently();
+                if (!this.accessToken) {
+                    throw new Error('再認証に失敗しました');
+                }
+            }
+
             // 既存フォルダを検索
             const searchResponse = await fetch(
                 `https://www.googleapis.com/drive/v3/files?q=name='JiritsuLog' and mimeType='application/vnd.google-apps.folder'`,
@@ -5174,6 +5250,16 @@ class JiritsuLogApp {
                     const folderId = searchData.files[0].id;
                     this.debugLog('既存のJiritsuLogフォルダを使用:', folderId);
                     return folderId;
+                }
+            } else if (searchResponse.status === 401) {
+                // 認証エラーの場合は再認証を試行
+                this.debugLog('認証エラーが発生しました。再認証を試行します');
+                await this.refreshAuthenticationSilently();
+                if (this.accessToken) {
+                    // 再帰的に呼び出し（一度だけ）
+                    return await this.getOrCreateJiritsuFolder();
+                } else {
+                    throw new Error('再認証に失敗しました');
                 }
             }
             
@@ -5199,6 +5285,9 @@ class JiritsuLogApp {
                 const createData = await createResponse.json();
                 this.debugLog('JiritsuLogフォルダを作成しました:', createData.id);
                 return createData.id;
+            } else if (createResponse.status === 401) {
+                // 認証エラーの場合
+                throw new Error('認証が無効です。再度ログインしてください');
             } else {
                 throw new Error(`フォルダ作成に失敗: ${createResponse.status}`);
             }
@@ -5207,6 +5296,126 @@ class JiritsuLogApp {
             this.errorLog('フォルダ取得/作成エラー:', error);
             throw error;
         }
+    }
+
+    // アクセストークンの有効性を確認
+    async validateAccessToken() {
+        if (!this.accessToken) {
+            return false;
+        }
+
+        try {
+            const response = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${this.accessToken}`);
+            if (response.ok) {
+                const tokenInfo = await response.json();
+                // 有効期限が10秒以上残っていれば有効とみなす
+                return tokenInfo.expires_in > 10;
+            }
+            return false;
+        } catch (error) {
+            this.debugLog('トークン検証エラー:', error);
+            return false;
+        }
+    }
+
+    // サイレント再認証を試行
+    async refreshAuthenticationSilently() {
+        try {
+            this.debugLog('サイレント再認証を開始します');
+            
+            // 保存されたリフレッシュトークンがある場合
+            const refreshToken = localStorage.getItem('jiritsulog_refresh_token');
+            if (refreshToken) {
+                this.debugLog('リフレッシュトークンを使用して再認証を試行します');
+                // リフレッシュトークンを使用してアクセストークンを更新
+                const success = await this.refreshAccessToken(refreshToken);
+                if (success) {
+                    return true;
+                }
+            }
+
+            // リフレッシュトークンがない場合は、新しい認証フローを開始
+            this.debugLog('新しい認証フローを開始します');
+            this.clearGoogleSession();
+            
+            // Google認証が利用可能かチェック
+            if (typeof google !== 'undefined' && google.accounts) {
+                // OAuth2フローで新しいトークンを取得
+                return new Promise((resolve) => {
+                    google.accounts.oauth2.initTokenClient({
+                        client_id: '47690741133-c4pbiefj90me73dflkla5q3ie67nbqdl.apps.googleusercontent.com',
+                        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+                        callback: (response) => {
+                            if (response.access_token) {
+                                this.accessToken = response.access_token;
+                                this.saveGoogleSession();
+                                this.debugLog('サイレント再認証が成功しました');
+                                resolve(true);
+                            } else {
+                                this.debugLog('サイレント再認証に失敗しました');
+                                resolve(false);
+                            }
+                        }
+                    }).requestAccessToken();
+                });
+            }
+            
+            return false;
+        } catch (error) {
+            this.errorLog('サイレント再認証エラー:', error);
+            return false;
+        }
+    }
+
+    // リフレッシュトークンを使用してアクセストークンを更新
+    async refreshAccessToken(refreshToken) {
+        try {
+            const response = await fetch('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    client_id: '47690741133-c4pbiefj90me73dflkla5q3ie67nbqdl.apps.googleusercontent.com',
+                    refresh_token: refreshToken,
+                    grant_type: 'refresh_token'
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.accessToken = data.access_token;
+                this.saveGoogleSession();
+                this.debugLog('アクセストークンが更新されました');
+                return true;
+            } else {
+                this.debugLog('リフレッシュトークンが無効です');
+                localStorage.removeItem('jiritsulog_refresh_token');
+                return false;
+            }
+        } catch (error) {
+            this.errorLog('トークン更新エラー:', error);
+            return false;
+        }
+    }
+
+    // 認証エラー時の処理
+    handleAuthenticationError() {
+        this.debugLog('認証エラーを処理します：サインアウト状態にします');
+        
+        // サインアウト状態にする
+        this.isSignedIn = false;
+        this.currentUser = null;
+        this.accessToken = null;
+        
+        // 保存されたセッション情報をクリア
+        this.clearGoogleSession();
+        
+        // UIを更新
+        this.updateAuthUI();
+        
+        // ユーザーに通知
+        this.showPopupNotification('認証が失効しました。Google連携機能を使用するには再度ログインしてください。', 'warning');
     }
 }
 
