@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jiritsulog-v2'; // バージョンアップでキャッシュクリア
+const CACHE_NAME = 'jiritsulog-v3'; // バージョンアップでキャッシュクリア
 const urlsToCache = [
     './index.html',
     './styles.css',
@@ -19,18 +19,52 @@ self.addEventListener('install', event => {
 
 // リソース取得時（ネットワーク優先でキャッシュ問題を解決）
 self.addEventListener('fetch', event => {
+    // データ同期に関連するAPIリクエストはキャッシュしない
+    if (event.request.url.includes('googleapis.com') || 
+        event.request.url.includes('accounts.google.com') ||
+        event.request.method !== 'GET') {
+        event.respondWith(fetch(event.request));
+        return;
+    }
+
     event.respondWith(
         // まずネットワークから取得を試行（常に最新を取得）
         fetch(event.request)
             .then(response => {
                 // レスポンスが有効な場合
                 if (response && response.status === 200) {
-                    // レスポンスをクローンしてキャッシュに保存（緊急時用）
-                    const responseToCache = response.clone();
-                    caches.open(CACHE_NAME)
-                        .then(cache => {
-                            cache.put(event.request, responseToCache);
+                    // HTMLファイルとJSファイルには no-cache ヘッダーを追加
+                    if (event.request.url.endsWith('.html') || 
+                        event.request.url.endsWith('.js') ||
+                        event.request.url.endsWith('/')) {
+                        
+                        const modifiedResponse = new Response(response.body, {
+                            status: response.status,
+                            statusText: response.statusText,
+                            headers: {
+                                ...response.headers,
+                                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                                'Pragma': 'no-cache',
+                                'Expires': '0'
+                            }
                         });
+                        
+                        // レスポンスをクローンしてキャッシュに保存（緊急時用のみ）
+                        const responseToCache = response.clone();
+                        caches.open(CACHE_NAME)
+                            .then(cache => {
+                                cache.put(event.request, responseToCache);
+                            });
+                        
+                        return modifiedResponse;
+                    } else {
+                        // CSS、画像などの静的リソースは通常通りキャッシュ
+                        const responseToCache = response.clone();
+                        caches.open(CACHE_NAME)
+                            .then(cache => {
+                                cache.put(event.request, responseToCache);
+                            });
+                    }
                 }
                 return response;
             })
@@ -117,6 +151,25 @@ self.addEventListener('sync', event => {
         event.waitUntil(
             // ここでオフライン時に蓄積されたデータの同期処理を行う
             console.log('バックグラウンド同期実行')
+        );
+    }
+});
+
+// メインスレッドからのメッセージを処理
+self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'CLEAR_CACHE') {
+        event.waitUntil(
+            caches.keys().then(cacheNames => {
+                return Promise.all(
+                    cacheNames.map(cacheName => caches.delete(cacheName))
+                );
+            }).then(() => {
+                console.log('Service Worker: すべてのキャッシュをクリアしました');
+                // メインスレッドに完了を通知
+                event.ports[0]?.postMessage({
+                    type: 'CACHE_CLEARED'
+                });
+            })
         );
     }
 });

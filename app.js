@@ -59,6 +59,9 @@ class JiritsuLogApp {
         console.log('=== アプリ初期化開始 ===');
         console.log('DOM ready state:', document.readyState);
         
+        // キャッシュクリアを強制実行（開発・デバッグ時）
+        this.clearBrowserCache();
+        
         // 基本的な初期化
         this.setupEventListeners();
         this.updateSessionNumber();
@@ -4335,18 +4338,33 @@ class JiritsuLogApp {
     // 初回同期
     async performInitialSync() {
         try {
-            // クラウドからデータをダウンロードしてマージ
-            const cloudData = await this.downloadDataFromGoogle();
-            if (cloudData) {
-                await this.mergeCloudData(cloudData);
+            this.debugLog('初回同期を開始します');
+            
+            // クラウドからデータをダウンロードしてマージ（エラーがあっても続行）
+            try {
+                const cloudData = await this.downloadDataFromGoogle();
+                if (cloudData) {
+                    await this.mergeCloudData(cloudData);
+                    this.debugLog('クラウドデータのマージが完了しました');
+                }
+            } catch (downloadError) {
+                this.warnLog('クラウドからのデータダウンロードをスキップしました:', downloadError.message);
             }
             
-            // ローカルデータをクラウドにアップロード
-            await this.uploadDataToGoogle();
+            // ローカルデータをクラウドにアップロード（エラーがあっても続行）
+            try {
+                await this.uploadDataToGoogle();
+                this.debugLog('ローカルデータのアップロードが完了しました');
+                this.updateLastSyncTime();
+                this.showPopupNotification('Google連携が完了しました', 'success');
+            } catch (uploadError) {
+                this.warnLog('ローカルデータのアップロードをスキップしました:', uploadError.message);
+                this.showPopupNotification('Google連携は完了しましたが、初回同期に失敗しました。手動同期をお試しください', 'warning');
+            }
             
-            this.updateLastSyncTime();
         } catch (error) {
             this.errorLog('初回同期エラー:', error);
+            this.showPopupNotification('Google連携は完了しましたが、同期でエラーが発生しました', 'warning');
         }
     }
 
@@ -4390,7 +4408,10 @@ class JiritsuLogApp {
             );
             
             if (!searchResponse.ok) {
-                throw new Error('ファイル検索に失敗しました');
+                if (searchResponse.status === 403) {
+                    throw new Error('Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。');
+                }
+                throw new Error(`ファイル検索に失敗しました (${searchResponse.status})`);
             }
             
             const searchData = await searchResponse.json();
@@ -4410,13 +4431,16 @@ class JiritsuLogApp {
                 
                 if (downloadResponse.ok) {
                     return await downloadResponse.json();
+                } else if (downloadResponse.status === 403) {
+                    throw new Error('Google Drive APIへのアクセス権限がありません。');
                 }
             }
             
+            this.debugLog('クラウドにデータファイルが見つかりませんでした（初回利用）');
             return null;
         } catch (error) {
             this.errorLog('データダウンロードエラー:', error);
-            return null;
+            throw error;
         }
     }
 
@@ -4440,6 +4464,13 @@ class JiritsuLogApp {
                     }
                 }
             );
+            
+            if (!searchResponse.ok) {
+                if (searchResponse.status === 403) {
+                    throw new Error('Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。');
+                }
+                throw new Error(`ファイル検索に失敗しました (${searchResponse.status})`);
+            }
             
             const searchData = await searchResponse.json();
             let url, method;
@@ -4482,7 +4513,10 @@ class JiritsuLogApp {
             });
             
             if (!uploadResponse.ok) {
-                throw new Error('データアップロードに失敗しました');
+                if (uploadResponse.status === 403) {
+                    throw new Error('Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。');
+                }
+                throw new Error(`データアップロードに失敗しました (${uploadResponse.status})`);
             }
             
             this.debugLog('データアップロード成功');
@@ -4549,6 +4583,39 @@ class JiritsuLogApp {
         } catch (error) {
             this.errorLog('JWT解析エラー:', error);
             return null;
+        }
+    }
+
+    // ブラウザキャッシュをクリア
+    async clearBrowserCache() {
+        try {
+            // Service Worker キャッシュをクリア
+            if ('caches' in window) {
+                const cacheNames = await caches.keys();
+                await Promise.all(cacheNames.map(name => caches.delete(name)));
+                this.debugLog('Service Worker キャッシュをクリアしました');
+            }
+            
+            // ブラウザのキャッシュヘッダーを設定
+            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'CLEAR_CACHE'
+                });
+            }
+            
+        } catch (error) {
+            this.debugLog('キャッシュクリアエラー:', error);
+        }
+    }
+
+    // ページリロード時のキャッシュ対策
+    forceReload() {
+        // キャッシュを無視してリロード
+        if (window.location.reload) {
+            window.location.reload(true);
+        } else {
+            // フォールバック
+            window.location.href = window.location.href + '?t=' + Date.now();
         }
     }
 }
