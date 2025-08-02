@@ -104,6 +104,9 @@ class JiritsuLogApp {
         this.loadDurationSettings();
         this.displayRecords();
         
+        // アプリ起動時の強制同期
+        this.performStartupSync();
+        
         this.debugLog('データ読み込み完了:', {
             recordsCount: this.records.length
         });
@@ -895,10 +898,10 @@ class JiritsuLogApp {
         this.records.push(record);
         this.saveRecords();
         
-        // Google連携が有効で自動同期が有効な場合は自動同期
-        if (this.isSignedIn && this.settings.autoSync !== false) {
-            this.syncDataWithGoogle().catch(error => {
-                this.errorLog('自動同期エラー:', error);
+        // 自動上書き処理
+        if (this.settings.autoOverwrite && this.isSignedIn) {
+            this.uploadDataToGoogle().catch(error => {
+                this.errorLog('記録作成後の自動上書きエラー:', error);
                 this.showPopupNotification('記録は保存されましたが、同期に失敗しました', 'warning');
             });
         }
@@ -3050,6 +3053,15 @@ class JiritsuLogApp {
             this.records = this.records.filter(r => r.id != recordId);
             this.saveRecords();
             this.displayRecords();
+            
+            // 自動上書き処理
+            if (this.settings.autoOverwrite && this.isSignedIn) {
+                this.uploadDataToGoogle().catch(error => {
+                    this.errorLog('記録削除後の自動上書きエラー:', error);
+                    this.showPopupNotification('記録は削除されましたが、同期に失敗しました', 'warning');
+                });
+            }
+            
             this.showPopupNotification('記録を削除しました', 'success');
         }
     }
@@ -4138,10 +4150,15 @@ class JiritsuLogApp {
             downloadSyncBtn.addEventListener('click', () => this.downloadSync());
         }
         
-        if (autoSyncCheckbox) {
-            autoSyncCheckbox.addEventListener('change', (e) => {
-                this.settings.autoSync = e.target.checked;
+        const autoOverwriteCheckbox = document.getElementById('auto-overwrite-enabled');
+        if (autoOverwriteCheckbox) {
+            // 初期値を設定から読み込み
+            autoOverwriteCheckbox.checked = this.settings.autoOverwrite || false;
+            
+            autoOverwriteCheckbox.addEventListener('change', (e) => {
+                this.settings.autoOverwrite = e.target.checked;
                 this.saveSettings();
+                this.debugLog('作成削除後上書き設定:', e.target.checked);
             });
         }
     }
@@ -4352,14 +4369,21 @@ class JiritsuLogApp {
         }
         
         try {
+            // ローディング表示
+            this.showLoadingOverlay('データを比較中...');
+            
             // クラウドデータを取得して比較
             const cloudData = await this.getCloudData();
             const localData = this.getLocalData();
+            
+            // ローディング非表示
+            this.hideLoadingOverlay();
             
             // データ比較モーダルを表示
             this.showDataComparisonModal('overwrite', localData, cloudData);
             
         } catch (error) {
+            this.hideLoadingOverlay();
             this.errorLog('上書き同期エラー:', error);
             this.showPopupNotification('データ比較に失敗しました', 'error');
         }
@@ -4372,14 +4396,21 @@ class JiritsuLogApp {
         }
         
         try {
+            // ローディング表示
+            this.showLoadingOverlay('データを比較中...');
+            
             // クラウドデータを取得して比較
             const cloudData = await this.getCloudData();
             const localData = this.getLocalData();
+            
+            // ローディング非表示
+            this.hideLoadingOverlay();
             
             // データ比較モーダルを表示
             this.showDataComparisonModal('download', localData, cloudData);
             
         } catch (error) {
+            this.hideLoadingOverlay();
             this.errorLog('反映同期エラー:', error);
             this.showPopupNotification('データ比較に失敗しました', 'error');
         }
@@ -4712,6 +4743,66 @@ class JiritsuLogApp {
             settings: finalSettings,
             userInfo: baseData.userInfo
         };
+    }
+
+    // ローディングオーバーレイ表示
+    showLoadingOverlay(text = 'データを処理中...') {
+        const overlay = document.getElementById('loading-overlay');
+        const textElement = overlay.querySelector('.loading-text');
+        if (overlay) {
+            textElement.textContent = text;
+            overlay.style.display = 'flex';
+        }
+    }
+
+    // ローディングオーバーレイ非表示
+    hideLoadingOverlay() {
+        const overlay = document.getElementById('loading-overlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
+
+    // アプリ起動時の強制同期
+    async performStartupSync() {
+        // Googleにログインしている場合のみ実行
+        if (this.isSignedIn || localStorage.getItem('jiritsulog_google_token')) {
+            try {
+                this.debugLog('アプリ起動時の強制同期を開始');
+                
+                // 保存されたトークンがある場合は復元
+                const savedToken = localStorage.getItem('jiritsulog_google_token');
+                const savedUserInfo = localStorage.getItem('jiritsulog_google_user');
+                
+                if (savedToken && savedUserInfo) {
+                    this.accessToken = savedToken;
+                    this.currentUser = JSON.parse(savedUserInfo);
+                    this.isSignedIn = true;
+                    
+                    // クラウドデータを取得して反映
+                    const cloudData = await this.downloadDataFromGoogle();
+                    if (cloudData) {
+                        // データを完全に置き換える（強制反映）
+                        this.records = cloudData.records || [];
+                        this.settings = { ...this.settings, ...(cloudData.settings || {}) };
+                        
+                        // ローカルストレージに保存
+                        this.saveRecords();
+                        this.saveSettings();
+                        
+                        // UIを更新
+                        this.displayRecords();
+                        this.loadUserSettings();
+                        
+                        this.debugLog('アプリ起動時の強制同期が完了しました');
+                        this.showPopupNotification('同期先データを反映しました', 'success');
+                    }
+                }
+            } catch (error) {
+                this.debugLog('アプリ起動時の強制同期エラー:', error);
+                // エラーは表示しない（サイレント失敗）
+            }
+        }
     }
 
     // データをGoogleドライブと同期
