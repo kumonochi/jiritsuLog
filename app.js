@@ -4400,9 +4400,12 @@ class JiritsuLogApp {
     // Googleドライブからデータをダウンロード
     async downloadDataFromGoogle() {
         try {
-            // ファイル検索
+            // 専用フォルダを作成してそこにファイルを保存する方式に変更
+            const folderId = await this.getOrCreateJiritsuFolder();
+            
+            // ファイル検索（専用フォルダ内）
             const searchResponse = await fetch(
-                `https://www.googleapis.com/drive/v3/files?q=name='jiritsulog_data.json'&spaces=appDataFolder`,
+                `https://www.googleapis.com/drive/v3/files?q=name='jiritsulog_data.json' and parents in '${folderId}'`,
                 {
                     headers: {
                         'Authorization': `Bearer ${this.accessToken}`
@@ -4458,9 +4461,12 @@ class JiritsuLogApp {
             
             const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
             
-            // 既存ファイルをチェック
+            // 専用フォルダを取得または作成
+            const folderId = await this.getOrCreateJiritsuFolder();
+            
+            // 既存ファイルをチェック（専用フォルダ内）
             const searchResponse = await fetch(
-                `https://www.googleapis.com/drive/v3/files?q=name='jiritsulog_data.json'&spaces=appDataFolder`,
+                `https://www.googleapis.com/drive/v3/files?q=name='jiritsulog_data.json' and parents in '${folderId}'`,
                 {
                     headers: {
                         'Authorization': `Bearer ${this.accessToken}`
@@ -4493,7 +4499,7 @@ class JiritsuLogApp {
             if (method === 'POST') {
                 const metadata = {
                     name: 'jiritsulog_data.json',
-                    parents: ['appDataFolder']
+                    parents: [folderId]  // 専用フォルダに保存
                 };
                 
                 const form = new FormData();
@@ -4710,6 +4716,62 @@ class JiritsuLogApp {
             
         } catch (error) {
             this.errorLog('Drive API テストエラー:', error);
+        }
+    }
+
+    // じりつログ専用フォルダを取得または作成
+    async getOrCreateJiritsuFolder() {
+        try {
+            // 既存フォルダを検索
+            const searchResponse = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=name='JiritsuLog' and mimeType='application/vnd.google-apps.folder'`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`
+                    }
+                }
+            );
+            
+            if (searchResponse.ok) {
+                const searchData = await searchResponse.json();
+                
+                if (searchData.files && searchData.files.length > 0) {
+                    // 既存フォルダが見つかった
+                    const folderId = searchData.files[0].id;
+                    this.debugLog('既存のJiritsuLogフォルダを使用:', folderId);
+                    return folderId;
+                }
+            }
+            
+            // フォルダが見つからない場合は新規作成
+            this.debugLog('JiritsuLogフォルダを新規作成します');
+            
+            const createResponse = await fetch(
+                'https://www.googleapis.com/drive/v3/files',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: 'JiritsuLog',
+                        mimeType: 'application/vnd.google-apps.folder'
+                    })
+                }
+            );
+            
+            if (createResponse.ok) {
+                const createData = await createResponse.json();
+                this.debugLog('JiritsuLogフォルダを作成しました:', createData.id);
+                return createData.id;
+            } else {
+                throw new Error(`フォルダ作成に失敗: ${createResponse.status}`);
+            }
+            
+        } catch (error) {
+            this.errorLog('フォルダ取得/作成エラー:', error);
+            throw error;
         }
     }
 }
