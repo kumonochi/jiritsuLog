@@ -8,6 +8,7 @@
     <link rel="icon" href="アイコン.png" type="image/png">
     <meta name="theme-color" content="#2980B9">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
     <div id="app">
@@ -441,6 +442,36 @@
                             </div>
                         </div>
                         <button id="enable-notifications" class="notification-btn">通知を有効にする</button>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <h3>Google連携</h3>
+                        <div class="google-sync-settings">
+                            <div id="google-auth-status" class="auth-status">
+                                <p>ログイン状態: <span id="auth-status-text">未ログイン</span></p>
+                                <p id="user-email" style="display: none;">アカウント: <span></span></p>
+                            </div>
+                            
+                            <div class="auth-buttons">
+                                <button id="google-signin-btn" class="auth-btn primary">Googleアカウントでログイン</button>
+                                <button id="google-signout-btn" class="auth-btn secondary" style="display: none;">ログアウト</button>
+                            </div>
+                            
+                            <div id="sync-controls" class="sync-controls" style="display: none;">
+                                <div class="sync-info">
+                                    <p>ログイン中のアカウントと端末間でデータが同期されます。</p>
+                                    <p>最後の同期: <span id="last-sync-time">未同期</span></p>
+                                </div>
+                                
+                                <div class="sync-buttons">
+                                    <button id="manual-sync-btn" class="sync-btn">手動同期</button>
+                                    <label>
+                                        <input type="checkbox" id="auto-sync-enabled" checked>
+                                        自動同期を有効にする
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     
                 </div>

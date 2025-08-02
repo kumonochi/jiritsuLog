@@ -412,6 +412,9 @@ class JiritsuLogApp {
             this.addDurationOption();
         });
 
+        // Google連携
+        this.setupGoogleAuth();
+
         // アコーディオン設定
         this.setupAccordions();
     }
@@ -870,6 +873,14 @@ class JiritsuLogApp {
 
         this.records.push(record);
         this.saveRecords();
+        
+        // Google連携が有効で自動同期が有効な場合は自動同期
+        if (this.isSignedIn && this.settings.autoSync !== false) {
+            this.syncDataWithGoogle().catch(error => {
+                this.errorLog('自動同期エラー:', error);
+                this.showPopupNotification('記録は保存されましたが、同期に失敗しました', 'warning');
+            });
+        }
         
         this.showPopupNotification('記録を保存しました！', 'success');
         this.clearForm();
@@ -4067,6 +4078,475 @@ class JiritsuLogApp {
         // Google同期が有効の場合は自動同期
         if (this.isSignedIn) {
             await this.syncDataWithGoogle();
+        }
+    }
+
+    // Google認証の設定
+    setupGoogleAuth() {
+        // Google Identity Servicesが読み込まれるまで待機
+        const waitForGoogleAPI = () => {
+            if (typeof google !== 'undefined' && google.accounts) {
+                this.initializeGoogleAuth();
+            } else {
+                setTimeout(waitForGoogleAPI, 100);
+            }
+        };
+        
+        waitForGoogleAPI();
+        
+        // ボタンイベントの設定
+        const signinBtn = document.getElementById('google-signin-btn');
+        const signoutBtn = document.getElementById('google-signout-btn');
+        const manualSyncBtn = document.getElementById('manual-sync-btn');
+        const autoSyncCheckbox = document.getElementById('auto-sync-enabled');
+        
+        if (signinBtn) {
+            signinBtn.addEventListener('click', () => this.signInWithGoogle());
+        }
+        
+        if (signoutBtn) {
+            signoutBtn.addEventListener('click', () => this.signOutFromGoogle());
+        }
+        
+        if (manualSyncBtn) {
+            manualSyncBtn.addEventListener('click', () => this.manualSync());
+        }
+        
+        if (autoSyncCheckbox) {
+            autoSyncCheckbox.addEventListener('change', (e) => {
+                this.settings.autoSync = e.target.checked;
+                this.saveSettings();
+            });
+        }
+    }
+
+    // Google認証の初期化
+    initializeGoogleAuth() {
+        try {
+            google.accounts.id.initialize({
+                client_id: '47690741133-c4pbiefj90me73dflkla5q3ie67nbqdl.apps.googleusercontent.com',
+                callback: this.handleGoogleSignIn.bind(this)
+            });
+            
+            this.debugLog('Google認証が初期化されました');
+            
+            // 既存のサインイン状態をチェック
+            this.checkExistingGoogleSession();
+            
+        } catch (error) {
+            this.errorLog('Google認証初期化エラー:', error);
+        }
+    }
+
+    // 既存のGoogle セッションをチェック
+    checkExistingGoogleSession() {
+        const savedToken = localStorage.getItem('jiritsulog_google_token');
+        const savedUserInfo = localStorage.getItem('jiritsulog_google_user');
+        
+        if (savedToken && savedUserInfo) {
+            try {
+                this.accessToken = savedToken;
+                this.currentUser = JSON.parse(savedUserInfo);
+                this.isSignedIn = true;
+                this.updateAuthUI();
+                this.debugLog('既存のGoogle セッションを復元しました');
+            } catch (error) {
+                this.errorLog('セッション復元エラー:', error);
+                this.clearGoogleSession();
+            }
+        }
+    }
+
+    // Googleサインイン
+    signInWithGoogle() {
+        try {
+            google.accounts.id.prompt((notification) => {
+                if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+                    // One Tap が表示されない場合は、ポップアップを表示
+                    this.showGoogleSignInPopup();
+                }
+            });
+        } catch (error) {
+            this.errorLog('Googleサインインエラー:', error);
+            this.showGoogleSignInPopup();
+        }
+    }
+
+    // Googleサインインポップアップを表示
+    showGoogleSignInPopup() {
+        try {
+            google.accounts.oauth2.initTokenClient({
+                client_id: '47690741133-c4pbiefj90me73dflkla5q3ie67nbqdl.apps.googleusercontent.com',
+                scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+                callback: this.handleGoogleOAuthCallback.bind(this)
+            }).requestAccessToken();
+        } catch (error) {
+            this.errorLog('Googleサインインポップアップエラー:', error);
+        }
+    }
+
+    // Google サインインコールバック (One Tap)
+    async handleGoogleSignIn(response) {
+        try {
+            const payload = this.parseJWT(response.credential);
+            this.currentUser = {
+                id: payload.sub,
+                email: payload.email,
+                name: payload.name,
+                picture: payload.picture
+            };
+            
+            // アクセストークンを取得するためにOAuthフローを実行
+            await this.getAccessTokenForUser();
+            
+        } catch (error) {
+            this.errorLog('Googleサインインコールバックエラー:', error);
+        }
+    }
+
+    // Google OAuth コールバック
+    async handleGoogleOAuthCallback(response) {
+        try {
+            if (response.access_token) {
+                this.accessToken = response.access_token;
+                
+                // ユーザー情報を取得
+                await this.fetchUserInfo();
+                
+                this.isSignedIn = true;
+                this.saveGoogleSession();
+                this.updateAuthUI();
+                
+                this.debugLog('Googleサインイン成功');
+                this.showPopupNotification('Googleアカウントにログインしました', 'success');
+                
+                // 初回ログイン時にデータ同期
+                await this.performInitialSync();
+                
+            } else {
+                throw new Error('アクセストークンが取得できませんでした');
+            }
+        } catch (error) {
+            this.errorLog('Google OAuth コールバックエラー:', error);
+            this.showPopupNotification('Googleログインに失敗しました', 'error');
+        }
+    }
+
+    // ユーザー情報を取得
+    async fetchUserInfo() {
+        try {
+            const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+            
+            if (response.ok) {
+                this.currentUser = await response.json();
+            }
+        } catch (error) {
+            this.errorLog('ユーザー情報取得エラー:', error);
+        }
+    }
+
+    // Googleサインアウト
+    signOutFromGoogle() {
+        try {
+            this.isSignedIn = false;
+            this.currentUser = null;
+            this.accessToken = null;
+            
+            this.clearGoogleSession();
+            this.updateAuthUI();
+            
+            this.debugLog('Googleサインアウト完了');
+            this.showPopupNotification('Googleアカウントからログアウトしました', 'info');
+            
+        } catch (error) {
+            this.errorLog('Googleサインアウトエラー:', error);
+        }
+    }
+
+    // Google セッションを保存
+    saveGoogleSession() {
+        if (this.accessToken) {
+            localStorage.setItem('jiritsulog_google_token', this.accessToken);
+        }
+        if (this.currentUser) {
+            localStorage.setItem('jiritsulog_google_user', JSON.stringify(this.currentUser));
+        }
+    }
+
+    // Google セッションをクリア
+    clearGoogleSession() {
+        localStorage.removeItem('jiritsulog_google_token');
+        localStorage.removeItem('jiritsulog_google_user');
+    }
+
+    // 認証UIを更新
+    updateAuthUI() {
+        const authStatusText = document.getElementById('auth-status-text');
+        const userEmail = document.getElementById('user-email');
+        const signinBtn = document.getElementById('google-signin-btn');
+        const signoutBtn = document.getElementById('google-signout-btn');
+        const syncControls = document.getElementById('sync-controls');
+        const autoSyncCheckbox = document.getElementById('auto-sync-enabled');
+        
+        if (this.isSignedIn && this.currentUser) {
+            authStatusText.textContent = 'ログイン中';
+            userEmail.style.display = 'block';
+            userEmail.querySelector('span').textContent = this.currentUser.email;
+            signinBtn.style.display = 'none';
+            signoutBtn.style.display = 'block';
+            syncControls.style.display = 'block';
+            
+            // 自動同期の設定を反映
+            if (autoSyncCheckbox) {
+                autoSyncCheckbox.checked = this.settings.autoSync !== false;
+            }
+        } else {
+            authStatusText.textContent = '未ログイン';
+            userEmail.style.display = 'none';
+            signinBtn.style.display = 'block';
+            signoutBtn.style.display = 'none';
+            syncControls.style.display = 'none';
+        }
+    }
+
+    // 手動同期
+    async manualSync() {
+        if (!this.isSignedIn) {
+            this.showPopupNotification('Googleアカウントにログインしてください', 'warning');
+            return;
+        }
+        
+        try {
+            this.showPopupNotification('データを同期中...', 'info');
+            await this.syncDataWithGoogle();
+            this.showPopupNotification('データ同期が完了しました', 'success');
+        } catch (error) {
+            this.errorLog('手動同期エラー:', error);
+            this.showPopupNotification('データ同期に失敗しました', 'error');
+        }
+    }
+
+    // 初回同期
+    async performInitialSync() {
+        try {
+            // クラウドからデータをダウンロードしてマージ
+            const cloudData = await this.downloadDataFromGoogle();
+            if (cloudData) {
+                await this.mergeCloudData(cloudData);
+            }
+            
+            // ローカルデータをクラウドにアップロード
+            await this.uploadDataToGoogle();
+            
+            this.updateLastSyncTime();
+        } catch (error) {
+            this.errorLog('初回同期エラー:', error);
+        }
+    }
+
+    // データをGoogleドライブと同期
+    async syncDataWithGoogle() {
+        if (!this.isSignedIn || !this.accessToken) {
+            throw new Error('Google認証が必要です');
+        }
+        
+        try {
+            // クラウドからデータをダウンロード
+            const cloudData = await this.downloadDataFromGoogle();
+            
+            if (cloudData) {
+                // データをマージ
+                await this.mergeCloudData(cloudData);
+            }
+            
+            // 最新データをクラウドにアップロード
+            await this.uploadDataToGoogle();
+            
+            this.updateLastSyncTime();
+            
+        } catch (error) {
+            this.errorLog('データ同期エラー:', error);
+            throw error;
+        }
+    }
+
+    // Googleドライブからデータをダウンロード
+    async downloadDataFromGoogle() {
+        try {
+            // ファイル検索
+            const searchResponse = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=name='jiritsulog_data.json'&spaces=appDataFolder`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`
+                    }
+                }
+            );
+            
+            if (!searchResponse.ok) {
+                throw new Error('ファイル検索に失敗しました');
+            }
+            
+            const searchData = await searchResponse.json();
+            
+            if (searchData.files && searchData.files.length > 0) {
+                const fileId = searchData.files[0].id;
+                
+                // ファイル内容をダウンロード
+                const downloadResponse = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${this.accessToken}`
+                        }
+                    }
+                );
+                
+                if (downloadResponse.ok) {
+                    return await downloadResponse.json();
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            this.errorLog('データダウンロードエラー:', error);
+            return null;
+        }
+    }
+
+    // Googleドライブにデータをアップロード
+    async uploadDataToGoogle() {
+        try {
+            const data = {
+                records: this.records,
+                settings: this.settings,
+                lastSync: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+            
+            // 既存ファイルをチェック
+            const searchResponse = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=name='jiritsulog_data.json'&spaces=appDataFolder`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`
+                    }
+                }
+            );
+            
+            const searchData = await searchResponse.json();
+            let url, method;
+            
+            if (searchData.files && searchData.files.length > 0) {
+                // 既存ファイルを更新
+                const fileId = searchData.files[0].id;
+                url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`;
+                method = 'PATCH';
+            } else {
+                // 新しいファイルを作成
+                url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+                method = 'POST';
+            }
+            
+            let body;
+            if (method === 'POST') {
+                const metadata = {
+                    name: 'jiritsulog_data.json',
+                    parents: ['appDataFolder']
+                };
+                
+                const form = new FormData();
+                form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                form.append('file', blob);
+                body = form;
+            } else {
+                body = blob;
+            }
+            
+            const uploadResponse = await fetch(url, {
+                method: method,
+                headers: method === 'PATCH' ? {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                } : {
+                    'Authorization': `Bearer ${this.accessToken}`
+                },
+                body: body
+            });
+            
+            if (!uploadResponse.ok) {
+                throw new Error('データアップロードに失敗しました');
+            }
+            
+            this.debugLog('データアップロード成功');
+            
+        } catch (error) {
+            this.errorLog('データアップロードエラー:', error);
+            throw error;
+        }
+    }
+
+    // クラウドデータとローカルデータをマージ
+    async mergeCloudData(cloudData) {
+        try {
+            if (cloudData.records && Array.isArray(cloudData.records)) {
+                // 記録データをマージ（重複を避ける）
+                const existingIds = new Set(this.records.map(r => r.id));
+                const newRecords = cloudData.records.filter(r => !existingIds.has(r.id));
+                
+                this.records = [...this.records, ...newRecords];
+                this.saveRecords();
+                
+                this.debugLog(`${newRecords.length}件の新しい記録をマージしました`);
+            }
+            
+            if (cloudData.settings) {
+                // 設定データをマージ（ローカル設定を優先しつつ、新しい項目は追加）
+                this.settings = { ...cloudData.settings, ...this.settings };
+                this.saveSettings();
+                
+                this.debugLog('設定データをマージしました');
+            }
+            
+            // UIを更新
+            this.displayRecords();
+            this.loadUserSettings();
+            
+        } catch (error) {
+            this.errorLog('データマージエラー:', error);
+            throw error;
+        }
+    }
+
+    // 最後の同期時間を更新
+    updateLastSyncTime() {
+        const lastSyncElement = document.getElementById('last-sync-time');
+        if (lastSyncElement) {
+            const now = new Date();
+            lastSyncElement.textContent = now.toLocaleString('ja-JP');
+        }
+    }
+
+    // JWTをパース
+    parseJWT(token) {
+        try {
+            const base64Url = token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(
+                atob(base64)
+                    .split('')
+                    .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+                    .join('')
+            );
+            return JSON.parse(jsonPayload);
+        } catch (error) {
+            this.errorLog('JWT解析エラー:', error);
+            return null;
         }
     }
 }

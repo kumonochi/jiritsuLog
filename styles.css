@@ -14,6 +14,112 @@ body {
     overflow-x: hidden;
 }
 
+/* Google連携設定のスタイル */
+.google-sync-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.auth-status {
+    padding: 12px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #17a2b8;
+}
+
+.auth-status p {
+    margin: 4px 0;
+    font-size: 14px;
+}
+
+.auth-buttons {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.auth-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 140px;
+}
+
+.auth-btn.primary {
+    background-color: #4285f4;
+    color: white;
+}
+
+.auth-btn.primary:hover {
+    background-color: #3367d6;
+}
+
+.auth-btn.secondary {
+    background-color: #6c757d;
+    color: white;
+}
+
+.auth-btn.secondary:hover {
+    background-color: #5a6268;
+}
+
+.sync-controls {
+    padding: 16px;
+    background-color: #e8f5e8;
+    border-radius: 8px;
+    border-left: 4px solid #28a745;
+}
+
+.sync-info {
+    margin-bottom: 12px;
+}
+
+.sync-info p {
+    margin: 4px 0;
+    font-size: 14px;
+    color: #495057;
+}
+
+.sync-buttons {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.sync-btn {
+    padding: 8px 16px;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.sync-btn:hover {
+    background-color: #218838;
+}
+
+.sync-buttons label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.sync-buttons input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+
 #app {
     display: flex;
     min-height: 100vh;
