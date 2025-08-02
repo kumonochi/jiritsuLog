@@ -21,6 +21,24 @@ class JiritsuLogApp {
         this.environment = { supportedByGoogleAuth: false };
         
         this.init();
+        
+        // モーダル関連のイベントリスナーを設定
+        this.setupGlobalModalListeners();
+    }
+    
+    setupGlobalModalListeners() {
+        // DOM読み込み後に実行
+        document.addEventListener('DOMContentLoaded', () => {
+            const modal = document.getElementById('data-comparison-modal');
+            if (modal) {
+                // ESCキーでモーダルを閉じる
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && modal.style.display !== 'none') {
+                        modal.style.display = 'none';
+                    }
+                });
+            }
+        });
     }
 
     
@@ -4100,7 +4118,8 @@ class JiritsuLogApp {
         // ボタンイベントの設定
         const signinBtn = document.getElementById('google-signin-btn');
         const signoutBtn = document.getElementById('google-signout-btn');
-        const manualSyncBtn = document.getElementById('manual-sync-btn');
+        const overwriteSyncBtn = document.getElementById('overwrite-sync-btn');
+        const downloadSyncBtn = document.getElementById('download-sync-btn');
         const autoSyncCheckbox = document.getElementById('auto-sync-enabled');
         
         if (signinBtn) {
@@ -4111,8 +4130,12 @@ class JiritsuLogApp {
             signoutBtn.addEventListener('click', () => this.signOutFromGoogle());
         }
         
-        if (manualSyncBtn) {
-            manualSyncBtn.addEventListener('click', () => this.manualSync());
+        if (overwriteSyncBtn) {
+            overwriteSyncBtn.addEventListener('click', () => this.overwriteSync());
+        }
+        
+        if (downloadSyncBtn) {
+            downloadSyncBtn.addEventListener('click', () => this.downloadSync());
         }
         
         if (autoSyncCheckbox) {
@@ -4322,19 +4345,43 @@ class JiritsuLogApp {
     }
 
     // 手動同期
-    async manualSync() {
+    async overwriteSync() {
         if (!this.isSignedIn) {
             this.showPopupNotification('Googleアカウントにログインしてください', 'warning');
             return;
         }
         
         try {
-            this.showPopupNotification('データを同期中...', 'info');
-            await this.syncDataWithGoogle();
-            this.showPopupNotification('データ同期が完了しました', 'success');
+            // クラウドデータを取得して比較
+            const cloudData = await this.getCloudData();
+            const localData = this.getLocalData();
+            
+            // データ比較モーダルを表示
+            this.showDataComparisonModal('overwrite', localData, cloudData);
+            
         } catch (error) {
-            this.errorLog('手動同期エラー:', error);
-            this.showPopupNotification('データ同期に失敗しました', 'error');
+            this.errorLog('上書き同期エラー:', error);
+            this.showPopupNotification('データ比較に失敗しました', 'error');
+        }
+    }
+
+    async downloadSync() {
+        if (!this.isSignedIn) {
+            this.showPopupNotification('Googleアカウントにログインしてください', 'warning');
+            return;
+        }
+        
+        try {
+            // クラウドデータを取得して比較
+            const cloudData = await this.getCloudData();
+            const localData = this.getLocalData();
+            
+            // データ比較モーダルを表示
+            this.showDataComparisonModal('download', localData, cloudData);
+            
+        } catch (error) {
+            this.errorLog('反映同期エラー:', error);
+            this.showPopupNotification('データ比較に失敗しました', 'error');
         }
     }
 
@@ -4369,6 +4416,302 @@ class JiritsuLogApp {
             this.errorLog('初回同期エラー:', error);
             this.showPopupNotification('Google連携は完了しましたが、同期でエラーが発生しました', 'warning');
         }
+    }
+
+    // ローカルデータを取得
+    getLocalData() {
+        return {
+            records: this.records || [],
+            settings: this.settings || {},
+            userInfo: this.currentUser
+        };
+    }
+
+    // クラウドデータを取得
+    async getCloudData() {
+        try {
+            return await this.downloadDataFromGoogle();
+        } catch (error) {
+            this.debugLog('クラウドデータ取得エラー:', error);
+            return null;
+        }
+    }
+
+    // データ比較モーダルを表示
+    showDataComparisonModal(syncType, localData, cloudData) {
+        const modal = document.getElementById('data-comparison-modal');
+        const title = document.getElementById('comparison-title');
+        const recordsComparison = document.getElementById('records-comparison');
+        const settingsComparison = document.getElementById('settings-comparison');
+        
+        // タイトル設定
+        title.textContent = syncType === 'overwrite' ? 'データ上書き確認' : 'データ反映確認';
+        
+        // 記録データの比較
+        recordsComparison.innerHTML = this.generateRecordsComparison(localData.records, cloudData?.records || [], syncType);
+        
+        // 設定データの比較
+        settingsComparison.innerHTML = this.generateSettingsComparison(localData.settings, cloudData?.settings || {}, syncType);
+        
+        // モーダル表示
+        modal.style.display = 'flex';
+        
+        // イベントリスナー設定
+        this.setupModalEventListeners(syncType, localData, cloudData);
+    }
+
+    // 記録データ比較の生成
+    generateRecordsComparison(localRecords, cloudRecords, syncType) {
+        const changes = this.compareRecords(localRecords, cloudRecords, syncType);
+        let html = '';
+        
+        if (changes.length === 0) {
+            html = '<p>記録データに変更はありません</p>';
+        } else {
+            changes.forEach((change, index) => {
+                const checked = change.type === 'keep' ? 'checked' : '';
+                html += `
+                    <div class="comparison-item ${change.type}">
+                        <label>
+                            <input type="checkbox" class="comparison-checkbox" data-type="record" data-index="${index}" ${checked}>
+                            <strong>${change.action}</strong>: ${change.description}
+                        </label>
+                    </div>
+                `;
+            });
+        }
+        
+        return html;
+    }
+
+    // 設定データ比較の生成
+    generateSettingsComparison(localSettings, cloudSettings, syncType) {
+        const changes = this.compareSettings(localSettings, cloudSettings, syncType);
+        let html = '';
+        
+        if (changes.length === 0) {
+            html = '<p>設定データに変更はありません</p>';
+        } else {
+            changes.forEach((change, index) => {
+                const checked = change.type === 'keep' ? 'checked' : '';
+                html += `
+                    <div class="comparison-item ${change.type}">
+                        <label>
+                            <input type="checkbox" class="comparison-checkbox" data-type="setting" data-index="${index}" ${checked}>
+                            <strong>${change.action}</strong>: ${change.description}
+                        </label>
+                    </div>
+                `;
+            });
+        }
+        
+        return html;
+    }
+
+    // 記録データを比較
+    compareRecords(localRecords, cloudRecords, syncType) {
+        const changes = [];
+        const localIds = new Set(localRecords.map(r => r.id));
+        const cloudIds = new Set(cloudRecords.map(r => r.id));
+        
+        if (syncType === 'overwrite') {
+            // ローカルにあってクラウドにない記録（追加される）
+            localRecords.forEach(record => {
+                if (!cloudIds.has(record.id)) {
+                    changes.push({
+                        type: 'added',
+                        action: '追加',
+                        description: `${record.date} ${record.sessionNumber}セット目の記録`,
+                        data: record
+                    });
+                }
+            });
+            
+            // クラウドにあってローカルにない記録（削除される）
+            cloudRecords.forEach(record => {
+                if (!localIds.has(record.id)) {
+                    changes.push({
+                        type: 'removed',
+                        action: '削除',
+                        description: `${record.date} ${record.sessionNumber}セット目の記録`,
+                        data: record
+                    });
+                }
+            });
+        } else {
+            // 反映の場合は逆
+            cloudRecords.forEach(record => {
+                if (!localIds.has(record.id)) {
+                    changes.push({
+                        type: 'added',
+                        action: '追加',
+                        description: `${record.date} ${record.sessionNumber}セット目の記録`,
+                        data: record
+                    });
+                }
+            });
+            
+            localRecords.forEach(record => {
+                if (!cloudIds.has(record.id)) {
+                    changes.push({
+                        type: 'removed',
+                        action: '削除',
+                        description: `${record.date} ${record.sessionNumber}セット目の記録`,
+                        data: record
+                    });
+                }
+            });
+        }
+        
+        return changes;
+    }
+
+    // 設定データを比較
+    compareSettings(localSettings, cloudSettings, syncType) {
+        const changes = [];
+        const allKeys = new Set([...Object.keys(localSettings), ...Object.keys(cloudSettings)]);
+        
+        allKeys.forEach(key => {
+            const localValue = localSettings[key];
+            const cloudValue = cloudSettings[key];
+            
+            if (JSON.stringify(localValue) !== JSON.stringify(cloudValue)) {
+                const sourceValue = syncType === 'overwrite' ? localValue : cloudValue;
+                const targetValue = syncType === 'overwrite' ? cloudValue : localValue;
+                
+                changes.push({
+                    type: 'modified',
+                    action: '変更',
+                    description: `${key}: ${JSON.stringify(targetValue)} → ${JSON.stringify(sourceValue)}`,
+                    key: key,
+                    newValue: sourceValue
+                });
+            }
+        });
+        
+        return changes;
+    }
+
+    // モーダルイベントリスナー設定
+    setupModalEventListeners(syncType, localData, cloudData) {
+        const modal = document.getElementById('data-comparison-modal');
+        const closeBtn = document.getElementById('close-comparison-modal');
+        const proceedBtn = document.getElementById('proceed-sync');
+        const cancelBtn = document.getElementById('cancel-sync');
+        
+        // 閉じるボタン
+        const closeModal = () => {
+            modal.style.display = 'none';
+        };
+        
+        closeBtn.onclick = closeModal;
+        cancelBtn.onclick = closeModal;
+        
+        // 実行ボタン
+        proceedBtn.onclick = () => {
+            this.executeSyncWithSelections(syncType, localData, cloudData);
+            closeModal();
+        };
+        
+        // モーダル外クリックで閉じる
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                closeModal();
+            }
+        };
+    }
+
+    // 選択に基づいて同期実行
+    async executeSyncWithSelections(syncType, localData, cloudData) {
+        try {
+            this.showPopupNotification('データ同期中...', 'info');
+            
+            const checkboxes = document.querySelectorAll('.comparison-checkbox');
+            const preserveItems = [];
+            
+            // チェックされた項目（保持する項目）を収集
+            checkboxes.forEach(checkbox => {
+                if (checkbox.checked) {
+                    preserveItems.push({
+                        type: checkbox.dataset.type,
+                        index: parseInt(checkbox.dataset.index)
+                    });
+                }
+            });
+            
+            // データマージの実行
+            const finalData = this.mergeDataWithSelections(syncType, localData, cloudData, preserveItems);
+            
+            // データを適用
+            this.records = finalData.records;
+            this.settings = finalData.settings;
+            
+            // ローカルストレージに保存
+            this.saveRecords();
+            this.saveSettings();
+            
+            // クラウドに同期
+            if (syncType === 'overwrite') {
+                await this.uploadDataToGoogle();
+            }
+            
+            // UI更新
+            this.displayRecords();
+            this.updateLastSyncTime();
+            
+            this.showPopupNotification('データ同期が完了しました', 'success');
+            
+        } catch (error) {
+            this.errorLog('同期実行エラー:', error);
+            this.showPopupNotification('データ同期に失敗しました', 'error');
+        }
+    }
+
+    // 選択に基づいてデータをマージ
+    mergeDataWithSelections(syncType, localData, cloudData, preserveItems) {
+        // 基本は対象データを使用
+        const baseData = syncType === 'overwrite' ? localData : (cloudData || localData);
+        const sourceData = syncType === 'overwrite' ? (cloudData || {}) : localData;
+        
+        const finalRecords = [...(baseData.records || [])];
+        const finalSettings = {...(baseData.settings || {})};
+        
+        // 保持する項目の処理
+        preserveItems.forEach(item => {
+            if (item.type === 'record') {
+                // 記録データの保持処理
+                const recordChanges = this.compareRecords(
+                    syncType === 'overwrite' ? localData.records : (cloudData?.records || []),
+                    syncType === 'overwrite' ? (cloudData?.records || []) : localData.records,
+                    syncType
+                );
+                
+                const change = recordChanges[item.index];
+                if (change && change.type === 'removed') {
+                    // 削除予定だったが保持する
+                    finalRecords.push(change.data);
+                }
+            } else if (item.type === 'setting') {
+                // 設定データの保持処理
+                const settingChanges = this.compareSettings(
+                    syncType === 'overwrite' ? localData.settings : (cloudData?.settings || {}),
+                    syncType === 'overwrite' ? (cloudData?.settings || {}) : localData.settings,
+                    syncType
+                );
+                
+                const change = settingChanges[item.index];
+                if (change) {
+                    // 元の値を保持
+                    finalSettings[change.key] = sourceData.settings[change.key];
+                }
+            }
+        });
+        
+        return {
+            records: finalRecords,
+            settings: finalSettings,
+            userInfo: baseData.userInfo
+        };
     }
 
     // データをGoogleドライブと同期

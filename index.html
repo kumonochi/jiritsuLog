@@ -8,6 +8,91 @@
     <link rel="icon" href="アイコン.png" type="image/png">
     <meta name="theme-color" content="#2980B9">
     <link rel="stylesheet" href="styles.css">
+    <style>
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80%;
+            overflow-y: auto;
+        }
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+        .modal-body {
+            padding: 20px;
+        }
+        .comparison-section {
+            margin-bottom: 30px;
+        }
+        .comparison-item {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            padding: 10px;
+        }
+        .comparison-item.added {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .comparison-item.removed {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        .comparison-item.modified {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+        }
+        .comparison-checkbox {
+            margin-right: 10px;
+        }
+        .modal-actions {
+            padding: 20px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn.primary {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn.secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+    </style>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -464,7 +549,8 @@
                                 </div>
                                 
                                 <div class="sync-buttons">
-                                    <button id="manual-sync-btn" class="sync-btn">手動同期</button>
+                                    <button id="overwrite-sync-btn" class="sync-btn">上書き</button>
+                                    <button id="download-sync-btn" class="sync-btn">反映</button>
                                     <label>
                                         <input type="checkbox" id="auto-sync-enabled" checked>
                                         自動同期を有効にする
@@ -498,6 +584,32 @@
                 </div>
             </div>
         </main>
+
+        <!-- データ比較モーダル -->
+        <div id="data-comparison-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="comparison-title">データ比較</h3>
+                    <button class="modal-close" id="close-comparison-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="comparison-content">
+                        <div class="comparison-section">
+                            <h4>記録データ</h4>
+                            <div id="records-comparison"></div>
+                        </div>
+                        <div class="comparison-section">
+                            <h4>設定データ</h4>
+                            <div id="settings-comparison"></div>
+                        </div>
+                    </div>
+                    <div class="modal-actions">
+                        <button id="proceed-sync" class="btn primary">実行</button>
+                        <button id="cancel-sync" class="btn secondary">キャンセル</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- モバイル用メニューボタン -->
         <button id="mobile-menu-btn" class="mobile-menu-btn">

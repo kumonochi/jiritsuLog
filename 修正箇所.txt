@@ -1,17 +1,2 @@
 【修正箇所】
-・以下のようなコンソールの結果になり、サイトにアクセスができません。この問題について修正を行ってください。
-
-The FetchEvent for "<URL>" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-The FetchEvent for "<URL>" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-The FetchEvent for "<URL>" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-The FetchEvent for "<URL>" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-The FetchEvent for "<URL>" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-The FetchEvent for "https://kumonochi.github.io/jiritsuLog/" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-The FetchEvent for "https://kumonochi.github.io/jiritsuLog/" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-The FetchEvent for "https://kumonochi.github.io/jiritsuLog/" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-The FetchEvent for "https://kumonochi.github.io/jiritsuLog/" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-Promise.then
-(anonymous) @ sw.js:30
-The FetchEvent for "https://kumonochi.github.io/jiritsuLog/" resulted in a network error response: a Response whose "body" is locked cannot be used to respond to a request.
-Promise.then
-(anonymous) @ sw.js:30
+・「手動同期」のボタンを「上書き」「反映」の2つのボタンに変えること。「上書き」ボタンを押したときには現在の記録データや設定データの内容をgoogle driveの同期先ファイルに上書きするか確認し、はいを押したら現在のデータを同期先ファイルに上書きすること。逆に「反映」ボタンを押した場合は同期先ファイルのデータをダウンロードして現在のデータに上書きして同期先のデータで反映させるかを確認すること。なお、「上書き」「反映」どちらでも、現在のデータと同期先ファイルを比較させてどのデータが追加されたり削除されることになるかを視覚的にわかるようにして、チェックボックス形式でどのデータはそのままにする、どのデータは上書きや削除をしてよいとするかを決められるようにすること。基本はチェックなしの場合は上書きされることとなり、チェックを入れるとそのデータは上書きなどはされずにそのまま一緒にアップグレードされたり、反映されたりする。
