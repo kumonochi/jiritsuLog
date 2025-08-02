@@ -38,23 +38,24 @@ self.addEventListener('fetch', event => {
                         event.request.url.endsWith('.js') ||
                         event.request.url.endsWith('/')) {
                         
-                        const modifiedResponse = new Response(response.body, {
-                            status: response.status,
-                            statusText: response.statusText,
-                            headers: {
-                                ...response.headers,
-                                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                                'Pragma': 'no-cache',
-                                'Expires': '0'
-                            }
-                        });
-                        
                         // レスポンスをクローンしてキャッシュに保存（緊急時用のみ）
                         const responseToCache = response.clone();
                         caches.open(CACHE_NAME)
                             .then(cache => {
                                 cache.put(event.request, responseToCache);
                             });
+                        
+                        // 新しいヘッダーオブジェクトを作成
+                        const newHeaders = new Headers(response.headers);
+                        newHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+                        newHeaders.set('Pragma', 'no-cache');
+                        newHeaders.set('Expires', '0');
+                        
+                        const modifiedResponse = new Response(response.clone().body, {
+                            status: response.status,
+                            statusText: response.statusText,
+                            headers: newHeaders
+                        });
                         
                         return modifiedResponse;
                     } else {
