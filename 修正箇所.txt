@@ -1,5 +1,6 @@
 【修正箇所】
-・以下のようなコンソールが表示され、アカウントのログインができなかった。原因を解明し修正を行うこと。こちらで確認すべき情報や提供すべき情報がある場合には教えること。
+・google drive apiのアクセス権限でエラーが起きました。権限はあるはずなのですが、何が原因か、どこを確認するべきか教えてください。
+
 app.js:59 === アプリ初期化開始 ===
 app.js:60 DOM ready state: interactive
 app.js:30 [🔧 DEBUG] データ読み込み開始
@@ -9,12 +10,37 @@ app.js:30 [🔧 DEBUG] ストレージキー生成: jiritsulog_settings
 app.js:30 [🔧 DEBUG] 設定データを読み込み: jiritsulog_settings
 app.js:30 [🔧 DEBUG] データ読み込み完了: Object
 app.js:30 [🔧 DEBUG] Service Worker registered: ServiceWorkerRegistration
+app.js:30 [🔧 DEBUG] Service Worker キャッシュをクリアしました
 app.js:30 [🔧 DEBUG] Google認証が初期化されました
+app.js:30 [🔧 DEBUG] 既存のGoogle セッションを復元しました
+app.js:30 [🔧 DEBUG] Googleサインアウト完了
 client:74 [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
 _.F @ client:74
-app.js:36 [❌ ERROR] Googleサインインコールバックエラー: TypeError: this.getAccessTokenForUser is not a function
-    at JiritsuLogApp.handleGoogleSignIn (app.js:4200:24)
-    at vt.fa (client:316:296)
-    at Ns.fa (client:294:200)
-    at client:292:793
+vt.ja @ client:319
+ns.ja @ client:356
+ss @ client:287
+signInWithGoogle @ app.js:4166
+(anonymous) @ app.js:4107
+app.js:30 [🔧 DEBUG] One Tap認証成功。OAuthフローでアクセストークンを取得します
+app.js:30 [🔧 DEBUG] Googleサインイン成功
+app.js:30 [🔧 DEBUG] 初回同期を開始します
+www.googleapis.com/drive/v3/files?q=name=%27jiritsulog_data.json%27&spaces=appDataFolder:1  Failed to load resource: the server responded with a status of 403 ()
+app.js:36 [❌ ERROR] データダウンロードエラー: Error: Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。
+    at JiritsuLogApp.downloadDataFromGoogle (app.js:4412:27)
+    at async JiritsuLogApp.performInitialSync (app.js:4345:35)
+    at async JiritsuLogApp.handleGoogleOAuthCallback (app.js:4229:17)
 errorLog @ app.js:36
+downloadDataFromGoogle @ app.js:4442
+app.js:42 [⚠️ WARN] クラウドからのデータダウンロードをスキップしました: Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。
+warnLog @ app.js:42
+performInitialSync @ app.js:4351
+www.googleapis.com/drive/v3/files?q=name=%27jiritsulog_data.json%27&spaces=appDataFolder:1  Failed to load resource: the server responded with a status of 403 ()
+app.js:36 [❌ ERROR] データアップロードエラー: Error: Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。
+    at JiritsuLogApp.uploadDataToGoogle (app.js:4470:27)
+    at async JiritsuLogApp.performInitialSync (app.js:4356:17)
+    at async JiritsuLogApp.handleGoogleOAuthCallback (app.js:4229:17)
+errorLog @ app.js:36
+uploadDataToGoogle @ app.js:4525
+app.js:42 [⚠️ WARN] ローカルデータのアップロードをスキップしました: Google Drive APIへのアクセス権限がありません。適切な権限でログインし直してください。
+warnLog @ app.js:42
+performInitialSync @ app.js:4361

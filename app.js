@@ -4215,6 +4215,9 @@ class JiritsuLogApp {
             if (response.access_token) {
                 this.accessToken = response.access_token;
                 
+                // トークンの詳細情報をデバッグ出力
+                await this.debugTokenInfo();
+                
                 // ユーザー情報を取得
                 await this.fetchUserInfo();
                 
@@ -4616,6 +4619,97 @@ class JiritsuLogApp {
         } else {
             // フォールバック
             window.location.href = window.location.href + '?t=' + Date.now();
+        }
+    }
+
+    // トークン情報のデバッグ
+    async debugTokenInfo() {
+        try {
+            this.debugLog('=== アクセストークン診断 ===');
+            this.debugLog('トークンの長さ:', this.accessToken ? this.accessToken.length : 'なし');
+            this.debugLog('トークンの最初の10文字:', this.accessToken ? this.accessToken.substring(0, 10) + '...' : 'なし');
+            
+            // トークン情報を取得
+            const tokenInfoResponse = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${this.accessToken}`);
+            
+            if (tokenInfoResponse.ok) {
+                const tokenInfo = await tokenInfoResponse.json();
+                this.debugLog('トークン情報:', tokenInfo);
+                this.debugLog('許可されたスコープ:', tokenInfo.scope);
+                this.debugLog('トークンの有効期限:', tokenInfo.expires_in, '秒');
+                
+                // 必要なスコープがあるかチェック
+                const requiredScopes = [
+                    'https://www.googleapis.com/auth/drive.file',
+                    'https://www.googleapis.com/auth/userinfo.profile',
+                    'https://www.googleapis.com/auth/userinfo.email'
+                ];
+                
+                const grantedScopes = tokenInfo.scope ? tokenInfo.scope.split(' ') : [];
+                this.debugLog('付与されたスコープ一覧:', grantedScopes);
+                
+                const missingScopes = requiredScopes.filter(scope => !grantedScopes.includes(scope));
+                if (missingScopes.length > 0) {
+                    this.errorLog('不足しているスコープ:', missingScopes);
+                    this.showPopupNotification(`不足している権限があります: ${missingScopes.join(', ')}`, 'warning');
+                } else {
+                    this.debugLog('✅ 必要なスコープはすべて付与されています');
+                }
+                
+            } else {
+                this.errorLog('トークン情報の取得に失敗:', tokenInfoResponse.status, tokenInfoResponse.statusText);
+            }
+            
+            // Google Drive API のテスト呼び出し
+            await this.testDriveAPIAccess();
+            
+        } catch (error) {
+            this.errorLog('トークン診断エラー:', error);
+        }
+    }
+
+    // Google Drive API へのアクセステスト
+    async testDriveAPIAccess() {
+        try {
+            this.debugLog('=== Google Drive API アクセステスト ===');
+            
+            // 最もシンプルなAPI呼び出しでテスト
+            const testResponse = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            this.debugLog('Drive API テスト結果:', testResponse.status, testResponse.statusText);
+            
+            if (testResponse.ok) {
+                const aboutInfo = await testResponse.json();
+                this.debugLog('✅ Google Drive API へのアクセス成功');
+                this.debugLog('ユーザー情報:', aboutInfo.user);
+            } else {
+                this.errorLog('❌ Google Drive API へのアクセス失敗');
+                const errorText = await testResponse.text();
+                this.errorLog('エラー詳細:', errorText);
+                
+                // 詳細なステータス別診断
+                switch (testResponse.status) {
+                    case 401:
+                        this.errorLog('診断: トークンが無効または期限切れです');
+                        break;
+                    case 403:
+                        this.errorLog('診断: Google Drive API が有効になっていないか、適切なスコープが付与されていません');
+                        break;
+                    case 429:
+                        this.errorLog('診断: API の使用制限に達しています');
+                        break;
+                    default:
+                        this.errorLog('診断: 不明なエラーです');
+                }
+            }
+            
+        } catch (error) {
+            this.errorLog('Drive API テストエラー:', error);
         }
     }
 }
