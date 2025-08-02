@@ -4196,8 +4196,10 @@ class JiritsuLogApp {
                 picture: payload.picture
             };
             
+            this.debugLog('One Tap認証成功。OAuthフローでアクセストークンを取得します');
+            
             // アクセストークンを取得するためにOAuthフローを実行
-            await this.getAccessTokenForUser();
+            this.showGoogleSignInPopup();
             
         } catch (error) {
             this.errorLog('Googleサインインコールバックエラー:', error);

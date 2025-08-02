@@ -1,0 +1,20 @@
+【修正箇所】
+・以下のようなコンソールが表示され、アカウントのログインができなかった。原因を解明し修正を行うこと。こちらで確認すべき情報や提供すべき情報がある場合には教えること。
+app.js:59 === アプリ初期化開始 ===
+app.js:60 DOM ready state: interactive
+app.js:30 [🔧 DEBUG] データ読み込み開始
+app.js:30 [🔧 DEBUG] ストレージキー生成: jiritsulog_records
+app.js:30 [🔧 DEBUG] 記録データを読み込み: jiritsulog_records 2件
+app.js:30 [🔧 DEBUG] ストレージキー生成: jiritsulog_settings
+app.js:30 [🔧 DEBUG] 設定データを読み込み: jiritsulog_settings
+app.js:30 [🔧 DEBUG] データ読み込み完了: Object
+app.js:30 [🔧 DEBUG] Service Worker registered: ServiceWorkerRegistration
+app.js:30 [🔧 DEBUG] Google認証が初期化されました
+client:74 [GSI_LOGGER]: Your client application uses one of the Google One Tap prompt UI status methods that may stop functioning when FedCM becomes mandatory. Refer to the migration guide to update your code accordingly and opt-in to FedCM to test your changes. Learn more: https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#display_moment and https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#skipped_moment
+_.F @ client:74
+app.js:36 [❌ ERROR] Googleサインインコールバックエラー: TypeError: this.getAccessTokenForUser is not a function
+    at JiritsuLogApp.handleGoogleSignIn (app.js:4200:24)
+    at vt.fa (client:316:296)
+    at Ns.fa (client:294:200)
+    at client:292:793
+errorLog @ app.js:36
