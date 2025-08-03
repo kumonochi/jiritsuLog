@@ -451,39 +451,31 @@ class JiritsuLogApp {
                 let recognition = null;
                 let isRecording = false;
                 
-                // マウスダウン/タッチスタートで録音開始
-                const startRecording = (e) => {
+                // クリック/タップでトグル（開始/停止）
+                const toggleRecording = (e) => {
                     e.preventDefault();
-                    if (isRecording) return;
                     
-                    const targetId = btn.dataset.target;
-                    recognition = this.startVoiceRecognition(targetId, btn);
-                    if (recognition) {
-                        isRecording = true;
+                    if (isRecording) {
+                        // 録音停止
+                        if (recognition) {
+                            recognition.stop();
+                            btn.classList.remove('recording');
+                            btn.disabled = false;
+                            isRecording = false;
+                            recognition = null;
+                        }
+                    } else {
+                        // 録音開始
+                        const targetId = btn.dataset.target;
+                        recognition = this.startVoiceRecognition(targetId, btn);
+                        if (recognition) {
+                            isRecording = true;
+                        }
                     }
                 };
                 
-                // マウスアップ/タッチエンドで録音停止
-                const stopRecording = (e) => {
-                    e.preventDefault();
-                    if (!isRecording || !recognition) return;
-                    
-                    recognition.stop();
-                    btn.classList.remove('recording');
-                    btn.disabled = false;
-                    isRecording = false;
-                    recognition = null;
-                };
-                
-                // マウスイベント
-                btn.addEventListener('mousedown', startRecording);
-                btn.addEventListener('mouseup', stopRecording);
-                btn.addEventListener('mouseleave', stopRecording); // マウスがボタンから離れた場合も停止
-                
-                // タッチイベント
-                btn.addEventListener('touchstart', startRecording);
-                btn.addEventListener('touchend', stopRecording);
-                btn.addEventListener('touchcancel', stopRecording); // タッチがキャンセルされた場合も停止
+                // クリックイベント
+                btn.addEventListener('click', toggleRecording);
             });
         } else {
             // 音声認識が利用できない場合はボタンを非表示
@@ -573,16 +565,29 @@ class JiritsuLogApp {
         const recognition = new SpeechRecognition();
         
         recognition.lang = 'ja-JP';
-        recognition.continuous = false;
-        recognition.interimResults = false;
+        recognition.continuous = true; // 継続録音を有効
+        recognition.interimResults = true; // 中間結果も取得
 
         button.classList.add('recording');
         button.disabled = true;
 
         recognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
             const textarea = document.getElementById(targetId);
-            textarea.value += (textarea.value ? '\n' : '') + transcript;
+            let finalTranscript = '';
+            let interimTranscript = '';
+            
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript + ' ';
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
+            
+            // 最終結果のみをテキストエリアに追加
+            if (finalTranscript) {
+                textarea.value += (textarea.value ? ' ' : '') + finalTranscript.trim();
+            }
         };
 
         recognition.onerror = (event) => {
@@ -1246,7 +1251,78 @@ class JiritsuLogApp {
     }
 
     playAlarmSound() {
-        // 簡単なビープ音を生成
+        const selectedSound = document.getElementById('alarm-sound').value;
+        
+        // 音声ファイルのマップ
+        const soundFiles = {
+            'ocean': '音声/海岸3.mp3',
+            'rain': '音声/雨が降る1.mp3',
+            'mountain': '音声/夏の山1.mp3',
+            'birds': '音声/軽井沢の野鳥たち1.mp3'
+        };
+        
+        if (soundFiles[selectedSound]) {
+            // 音声ファイルを再生
+            this.playAudioFile(soundFiles[selectedSound]);
+        } else {
+            // デフォルトの電子音（やさしいチャイム、ベル、チャイム）
+            this.playElectronicSound(selectedSound);
+        }
+    }
+    
+    playAudioFile(filePath) {
+        const audio = new Audio(filePath);
+        audio.volume = 0; // フェードイン開始時は無音
+        
+        // フェードイン効果
+        const fadeInDuration = 2000; // 2秒でフェードイン
+        const steps = 20;
+        const stepDuration = fadeInDuration / steps;
+        const volumeStep = 0.7 / steps; // 最大音量70%
+        
+        let currentStep = 0;
+        
+        const fadeInInterval = setInterval(() => {
+            currentStep++;
+            audio.volume = Math.min(0.7, volumeStep * currentStep);
+            
+            if (currentStep >= steps) {
+                clearInterval(fadeInInterval);
+            }
+        }, stepDuration);
+        
+        audio.play().catch(error => {
+            console.error('音声再生エラー:', error);
+            // 音声再生に失敗した場合はデフォルト音を再生
+            this.playElectronicSound('gentle');
+        });
+        
+        // 10秒後にフェードアウト
+        setTimeout(() => {
+            this.fadeOutAudio(audio, 2000);
+        }, 10000);
+    }
+    
+    fadeOutAudio(audio, duration) {
+        const steps = 20;
+        const stepDuration = duration / steps;
+        const volumeStep = audio.volume / steps;
+        
+        let currentStep = 0;
+        
+        const fadeOutInterval = setInterval(() => {
+            currentStep++;
+            audio.volume = Math.max(0, audio.volume - volumeStep);
+            
+            if (currentStep >= steps || audio.volume <= 0) {
+                clearInterval(fadeOutInterval);
+                audio.pause();
+                audio.currentTime = 0;
+            }
+        }, stepDuration);
+    }
+    
+    playElectronicSound(soundType) {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
@@ -1254,8 +1330,20 @@ class JiritsuLogApp {
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
         
-        oscillator.frequency.value = 800;
-        oscillator.type = 'sine';
+        // 音の種類に応じて周波数を変更
+        switch(soundType) {
+            case 'bell':
+                oscillator.frequency.value = 1000;
+                oscillator.type = 'sine';
+                break;
+            case 'chime':
+                oscillator.frequency.value = 600;
+                oscillator.type = 'triangle';
+                break;
+            default: // gentle
+                oscillator.frequency.value = 800;
+                oscillator.type = 'sine';
+        }
         
         gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
         gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1);
