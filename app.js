@@ -444,44 +444,49 @@ class JiritsuLogApp {
     }
 
     setupVoiceRecognition() {
+        console.log('🎤 setupVoiceRecognition開始');
+        
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            console.log('🎤 音声認識API利用可能');
             
+            // 既存のイベントリスナーをすべて削除
             document.querySelectorAll('.voice-btn').forEach(btn => {
-                // ボタンごとの状態管理
-                btn.voiceRecognition = null;
-                btn.isRecording = false;
+                const newBtn = btn.cloneNode(true);
+                btn.parentNode.replaceChild(newBtn, btn);
+            });
+            
+            // 新しいボタンに対してイベントリスナーを設定
+            document.querySelectorAll('.voice-btn').forEach(btn => {
+                console.log('🎤 ボタン初期化:', btn.dataset.target);
+                
+                // ボタンごとの状態を初期化
+                btn.voiceState = {
+                    recognition: null,
+                    isRecording: false,
+                    targetId: btn.dataset.target
+                };
                 
                 // クリック/タップでトグル（開始/停止）
-                const toggleRecording = (e) => {
+                btn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     
-                    if (btn.isRecording && btn.voiceRecognition) {
-                        // 録音停止
-                        btn.voiceRecognition.stop();
+                    console.log(`🎤 [${btn.voiceState.targetId}] クリック検出 - 現在の状態: isRecording=${btn.voiceState.isRecording}`);
+                    
+                    if (btn.voiceState.isRecording) {
+                        console.log(`🎤 [${btn.voiceState.targetId}] 停止処理開始`);
                         this.stopVoiceRecording(btn);
                     } else {
-                        // 録音開始
-                        const targetId = btn.dataset.target;
-                        const recognition = this.startVoiceRecognition(targetId, btn);
-                        if (recognition) {
-                            btn.voiceRecognition = recognition;
-                            btn.isRecording = true;
-                            
-                            // 音声認識が自動で終了した場合の処理
-                            recognition.onend = () => {
-                                this.stopVoiceRecording(btn);
-                            };
-                        }
+                        console.log(`🎤 [${btn.voiceState.targetId}] 開始処理開始`);
+                        this.startVoiceRecording(btn);
                     }
-                };
-                
-                // 既存のイベントリスナーを削除してから新しいものを追加
-                btn.removeEventListener('click', toggleRecording);
-                btn.addEventListener('click', toggleRecording);
+                    
+                    console.log(`🎤 [${btn.voiceState.targetId}] 処理後の状態: isRecording=${btn.voiceState.isRecording}`);
+                });
             });
         } else {
+            console.log('🎤 音声認識API利用不可');
             // 音声認識が利用できない場合はボタンを非表示
             document.querySelectorAll('.voice-btn').forEach(btn => {
                 btn.style.display = 'none';
@@ -489,161 +494,134 @@ class JiritsuLogApp {
         }
     }
     
-    stopVoiceRecording(button) {
-        button.isRecording = false;
-        button.voiceRecognition = null;
-        button.classList.remove('recording');
-        button.disabled = false;
-    }
-
-    async startVoiceRecognition(targetId, button) {
+    async startVoiceRecording(button) {
+        const targetId = button.voiceState.targetId;
+        console.log(`🟢 [${targetId}] 録音開始処理`);
+        
+        if (button.voiceState.isRecording) {
+            console.log(`⚠️ [${targetId}] 既に録音中のため開始処理をスキップ`);
+            return;
+        }
+        
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         
-        if (!SpeechRecognition) {
-            alert('お使いのブラウザは音声認識をサポートしていません。');
-            return null;
-        }
-
-        // マイクの許可と利用可能なデバイスの確認
         try {
-            // 利用可能なマイクデバイスを取得
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const audioInputs = devices.filter(device => device.kind === 'audioinput');
+            // マイク許可確認
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
             
-            if (audioInputs.length === 0) {
-                alert('使用できるマイクがありません。\n\nマイクが接続されているか確認してください。');
-                return;
+            // 既存の recognition があれば先に停止
+            if (button.voiceState.recognition) {
+                console.log(`🟡 [${targetId}] 既存の音声認識を停止`);
+                try {
+                    button.voiceState.recognition.stop();
+                } catch (e) {
+                    console.log(`⚠️ [${targetId}] 既存音声認識停止エラー:`, e);
+                }
+                button.voiceState.recognition = null;
             }
             
-            // 標準マイクを優先的に選択
-            let selectedDeviceId = null;
-            const defaultDevice = audioInputs.find(device => 
-                device.deviceId === 'default' || 
-                device.label.toLowerCase().includes('default') ||
-                device.label.toLowerCase().includes('built-in') ||
-                device.label.toLowerCase().includes('内蔵')
-            );
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'ja-JP';
+            recognition.continuous = true;
+            recognition.interimResults = true;
             
-            if (defaultDevice) {
-                selectedDeviceId = defaultDevice.deviceId;
-            } else {
-                // デフォルトが見つからない場合は最初のデバイスを使用
-                selectedDeviceId = audioInputs[0].deviceId;
-            }
+            // 状態更新
+            button.voiceState.recognition = recognition;
+            button.voiceState.isRecording = true;
+            button.classList.add('recording');
+            button.disabled = true;
             
-            // 選択されたマイクでストリームを取得
-            const constraints = {
-                audio: {
-                    deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
+            console.log(`🟢 [${targetId}] 録音状態に変更完了`);
+            
+            // イベントハンドラー設定
+            recognition.onresult = (event) => {
+                console.log(`📝 [${targetId}] 音声認識結果受信`);
+                const textarea = document.getElementById(targetId);
+                let finalTranscript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript + ' ';
+                    }
+                }
+                
+                if (finalTranscript) {
+                    textarea.value += (textarea.value ? ' ' : '') + finalTranscript.trim();
+                    console.log(`📝 [${targetId}] テキスト追加: "${finalTranscript.trim()}"`);
                 }
             };
             
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            // 許可が得られたらストリームを停止
-            stream.getTracks().forEach(track => track.stop());
-            
-        } catch (error) {
-            console.error('マイク許可エラー:', error);
-            
-            if (error.name === 'NotAllowedError') {
-                const result = confirm(
-                    'マイクの使用許可が必要です。\n\n' +
-                    '1. ブラウザのアドレスバー左側のマイクアイコンをクリック\n' +
-                    '2. 「マイクの使用を許可」を選択\n' +
-                    '3. ページを再読み込みしてください\n\n' +
-                    'ブラウザの設定ページを開きますか？'
-                );
-                if (result) {
-                    if (navigator.userAgent.includes('Chrome')) {
-                        window.open('chrome://settings/content/microphone', '_blank');
-                    } else {
-                        alert('ブラウザの設定からマイクの使用を許可してください。');
-                    }
+            recognition.onerror = (event) => {
+                console.log(`❌ [${targetId}] 音声認識エラー: ${event.error}`);
+                
+                // 重要: エラー時には手動で停止処理を呼ぶ
+                if (button.voiceState && button.voiceState.isRecording) {
+                    console.log(`❌ [${targetId}] エラーによる停止処理実行`);
+                    this.stopVoiceRecording(button);
                 }
-            } else if (error.name === 'NotFoundError') {
-                alert('使用できるマイクがありません。\n\nマイクが正しく接続されているか確認してください。');
-            } else if (error.name === 'NotReadableError') {
-                alert('マイクが他のアプリケーションで使用中です。\n\n他のアプリを閉じてから再度お試しください。');
-            } else {
-                alert('マイクにアクセスできませんでした。\n\nマイクが正しく接続されているか確認してください。');
-            }
-            return;
-        }
-
-        const recognition = new SpeechRecognition();
-        
-        recognition.lang = 'ja-JP';
-        recognition.continuous = true; // 継続録音を有効
-        recognition.interimResults = true; // 中間結果も取得
-
-        button.classList.add('recording');
-        button.disabled = true;
-
-        recognition.onresult = (event) => {
-            const textarea = document.getElementById(targetId);
-            let finalTranscript = '';
-            let interimTranscript = '';
+                
+                if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                    alert(`音声認識エラー: ${event.error}`);
+                }
+            };
             
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                if (event.results[i].isFinal) {
-                    finalTranscript += event.results[i][0].transcript + ' ';
+            recognition.onend = () => {
+                console.log(`🔚 [${targetId}] 音声認識終了イベント`);
+                // onend イベント時は自然終了なので、すでに停止処理が実行される可能性がある
+                // 状態チェックをしてから停止処理を実行
+                if (button.voiceState && button.voiceState.isRecording) {
+                    console.log(`🔚 [${targetId}] 自然終了による停止処理実行`);
+                    this.stopVoiceRecording(button);
                 } else {
-                    interimTranscript += event.results[i][0].transcript;
+                    console.log(`🔚 [${targetId}] 既に停止済みのため処理スキップ`);
                 }
-            }
+            };
             
-            // 最終結果のみをテキストエリアに追加
-            if (finalTranscript) {
-                textarea.value += (textarea.value ? ' ' : '') + finalTranscript.trim();
-            }
-        };
-
-        recognition.onerror = (event) => {
-            console.error('音声認識エラー:', event.error);
-            let errorMessage = '音声認識に失敗しました。';
-            
-            switch(event.error) {
-                case 'not-allowed':
-                    errorMessage = 'マイクの使用が許可されていません。ブラウザの設定でマイクの使用を許可してください。';
-                    break;
-                case 'no-speech':
-                    // 音声が検出されない場合はエラーメッセージを表示しない（正常な場合）
-                    this.stopVoiceRecording(button);
-                    return;
-                case 'network':
-                    errorMessage = 'ネットワークエラーが発生しました。インターネット接続を確認してください。';
-                    break;
-                case 'audio-capture':
-                    errorMessage = 'マイクにアクセスできませんでした。\n\n・マイクが正しく接続されているか確認\n・他のアプリでマイクを使用していないか確認\n・ブラウザでマイクの使用が許可されているか確認';
-                    break;
-                case 'aborted':
-                    // 手動停止の場合はエラーメッセージを表示しない
-                    this.stopVoiceRecording(button);
-                    return;
-                case 'language-not-supported':
-                    errorMessage = '選択された言語はサポートされていません。';
-                    break;
-                default:
-                    errorMessage = `音声認識エラー: ${event.error}\n\nマイクの接続と設定を確認してください。`;
-            }
-            
-            this.stopVoiceRecording(button);
-            alert(errorMessage);
-        };
-
-        try {
             recognition.start();
-            return recognition;
+            console.log(`🟢 [${targetId}] 音声認識開始完了`);
+            
         } catch (error) {
-            console.error('音声認識開始エラー:', error);
-            alert('音声認識を開始できませんでした。ブラウザがサポートしていない可能性があります。');
+            console.log(`❌ [${targetId}] 録音開始エラー:`, error);
             this.stopVoiceRecording(button);
-            return null;
+            alert('音声認識を開始できませんでした。マイクの許可を確認してください。');
         }
     }
+    
+    stopVoiceRecording(button) {
+        // ボタンや状態の安全性チェック
+        if (!button || !button.voiceState) {
+            console.log(`⚠️ ボタンまたは状態が無効のため停止処理をスキップ`);
+            return;
+        }
+        
+        const targetId = button.voiceState.targetId;
+        console.log(`🔴 [${targetId}] 録音停止処理開始`);
+        
+        if (!button.voiceState.isRecording) {
+            console.log(`⚠️ [${targetId}] 既に停止中のため停止処理をスキップ`);
+            return;
+        }
+        
+        // 音声認識を停止
+        if (button.voiceState.recognition) {
+            try {
+                button.voiceState.recognition.stop();
+                console.log(`🔴 [${targetId}] 音声認識停止実行`);
+            } catch (error) {
+                console.log(`❌ [${targetId}] 音声認識停止エラー:`, error);
+            }
+        }
+        
+        // 状態をリセット
+        button.voiceState.recognition = null;
+        button.voiceState.isRecording = false;
+        button.classList.remove('recording');
+        button.disabled = false;
+        
+        console.log(`🔴 [${targetId}] 録音停止処理完了`);
+    }
+
 
     showPage(pageId) {
         // すべてのページを非表示
