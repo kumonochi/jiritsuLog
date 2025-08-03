@@ -448,33 +448,37 @@ class JiritsuLogApp {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             
             document.querySelectorAll('.voice-btn').forEach(btn => {
-                let recognition = null;
-                let isRecording = false;
+                // ボタンごとの状態管理
+                btn.voiceRecognition = null;
+                btn.isRecording = false;
                 
                 // クリック/タップでトグル（開始/停止）
                 const toggleRecording = (e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     
-                    if (isRecording) {
+                    if (btn.isRecording && btn.voiceRecognition) {
                         // 録音停止
-                        if (recognition) {
-                            recognition.stop();
-                            btn.classList.remove('recording');
-                            btn.disabled = false;
-                            isRecording = false;
-                            recognition = null;
-                        }
+                        btn.voiceRecognition.stop();
+                        this.stopVoiceRecording(btn);
                     } else {
                         // 録音開始
                         const targetId = btn.dataset.target;
-                        recognition = this.startVoiceRecognition(targetId, btn);
+                        const recognition = this.startVoiceRecognition(targetId, btn);
                         if (recognition) {
-                            isRecording = true;
+                            btn.voiceRecognition = recognition;
+                            btn.isRecording = true;
+                            
+                            // 音声認識が自動で終了した場合の処理
+                            recognition.onend = () => {
+                                this.stopVoiceRecording(btn);
+                            };
                         }
                     }
                 };
                 
-                // クリックイベント
+                // 既存のイベントリスナーを削除してから新しいものを追加
+                btn.removeEventListener('click', toggleRecording);
                 btn.addEventListener('click', toggleRecording);
             });
         } else {
@@ -483,6 +487,13 @@ class JiritsuLogApp {
                 btn.style.display = 'none';
             });
         }
+    }
+    
+    stopVoiceRecording(button) {
+        button.isRecording = false;
+        button.voiceRecognition = null;
+        button.classList.remove('recording');
+        button.disabled = false;
     }
 
     async startVoiceRecognition(targetId, button) {
@@ -600,8 +611,7 @@ class JiritsuLogApp {
                     break;
                 case 'no-speech':
                     // 音声が検出されない場合はエラーメッセージを表示しない（正常な場合）
-                    button.classList.remove('recording');
-                    button.disabled = false;
+                    this.stopVoiceRecording(button);
                     return;
                 case 'network':
                     errorMessage = 'ネットワークエラーが発生しました。インターネット接続を確認してください。';
@@ -611,8 +621,7 @@ class JiritsuLogApp {
                     break;
                 case 'aborted':
                     // 手動停止の場合はエラーメッセージを表示しない
-                    button.classList.remove('recording');
-                    button.disabled = false;
+                    this.stopVoiceRecording(button);
                     return;
                 case 'language-not-supported':
                     errorMessage = '選択された言語はサポートされていません。';
@@ -621,14 +630,8 @@ class JiritsuLogApp {
                     errorMessage = `音声認識エラー: ${event.error}\n\nマイクの接続と設定を確認してください。`;
             }
             
-            button.classList.remove('recording');
-            button.disabled = false;
+            this.stopVoiceRecording(button);
             alert(errorMessage);
-        };
-
-        recognition.onend = () => {
-            button.classList.remove('recording');
-            button.disabled = false;
         };
 
         try {
@@ -637,8 +640,7 @@ class JiritsuLogApp {
         } catch (error) {
             console.error('音声認識開始エラー:', error);
             alert('音声認識を開始できませんでした。ブラウザがサポートしていない可能性があります。');
-            button.classList.remove('recording');
-            button.disabled = false;
+            this.stopVoiceRecording(button);
             return null;
         }
     }
