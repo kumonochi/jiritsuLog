@@ -4763,45 +4763,38 @@ class JiritsuLogApp {
         }
     }
 
-    // アプリ起動時の強制同期
+    // アプリ起動時の同期チェック
     async performStartupSync() {
-        // Googleにログインしている場合のみ実行
-        if (this.isSignedIn || localStorage.getItem('jiritsulog_google_token')) {
+        // 既にログイン状態の場合のみ同期を実行
+        if (this.isSignedIn && this.accessToken) {
             try {
-                this.debugLog('アプリ起動時の強制同期を開始');
+                this.debugLog('既にログイン済み - 同期データを確認中');
                 
-                // 保存されたトークンがある場合は復元
-                const savedToken = localStorage.getItem('jiritsulog_google_token');
-                const savedUserInfo = localStorage.getItem('jiritsulog_google_user');
-                
-                if (savedToken && savedUserInfo) {
-                    this.accessToken = savedToken;
-                    this.currentUser = JSON.parse(savedUserInfo);
-                    this.isSignedIn = true;
+                // クラウドデータを取得して反映
+                const cloudData = await this.downloadDataFromGoogle();
+                if (cloudData) {
+                    // データを完全に置き換える（強制反映）
+                    this.records = cloudData.records || [];
+                    this.settings = { ...this.settings, ...(cloudData.settings || {}) };
                     
-                    // クラウドデータを取得して反映
-                    const cloudData = await this.downloadDataFromGoogle();
-                    if (cloudData) {
-                        // データを完全に置き換える（強制反映）
-                        this.records = cloudData.records || [];
-                        this.settings = { ...this.settings, ...(cloudData.settings || {}) };
-                        
-                        // ローカルストレージに保存
-                        this.saveRecords();
-                        this.saveSettings();
-                        
-                        // UIを更新
-                        this.displayRecords();
-                        this.loadUserSettings();
-                        
-                        this.debugLog('アプリ起動時の強制同期が完了しました');
-                        this.showPopupNotification('同期先データを反映しました', 'success');
-                    }
+                    // ローカルストレージに保存
+                    this.saveRecords();
+                    this.saveSettings();
+                    
+                    // UIを更新
+                    this.displayRecords();
+                    this.loadUserSettings();
+                    
+                    this.debugLog('同期データの反映が完了しました');
+                    this.showPopupNotification('同期先データを反映しました', 'success');
                 }
             } catch (error) {
-                this.debugLog('アプリ起動時の強制同期エラー:', error);
+                this.debugLog('同期データ取得エラー:', error);
                 // エラーは表示しない（サイレント失敗）
             }
+        } else {
+            // 未ログイン状態では何も処理しない
+            this.debugLog('未ログイン状態 - 同期処理をスキップ');
         }
     }
 

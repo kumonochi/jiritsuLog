@@ -1072,6 +1072,8 @@ h2 {
     max-height: 600px;
     overflow-y: auto;
     scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
 }
 
 #duration-settings {
@@ -1082,6 +1084,7 @@ h2 {
     overflow-y: auto;
     scrollbar-width: thin;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
 }
 
 .duration-item {
@@ -1504,11 +1507,18 @@ h2 {
     
     #duration-settings {
         max-height: 300px;
+        overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        touch-action: pan-y;
     }
     
     .accordion-content.open {
         max-height: 400px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        touch-action: pan-y;
     }
     
     .sidebar {
@@ -1653,6 +1663,8 @@ h2 {
     
     .settings-container {
         padding: 0;
+        max-width: 100%;
+        width: 100%;
     }
     
     .setting-group {
@@ -1764,6 +1776,25 @@ h2 {
     .nav-link {
         padding: 12px 15px;
         font-size: 0.9rem;
+    }
+    
+    .setting-group {
+        padding: 15px;
+        margin-bottom: 15px;
+    }
+    
+    .auth-btn {
+        min-width: 120px;
+        font-size: 13px;
+    }
+    
+    .duration-add-form {
+        padding: 10px;
+        gap: 6px;
+    }
+    
+    .duration-add-form input {
+        width: 60px;
     }
 }
 
