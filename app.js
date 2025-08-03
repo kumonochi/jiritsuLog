@@ -448,10 +448,42 @@ class JiritsuLogApp {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             
             document.querySelectorAll('.voice-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const targetId = e.target.dataset.target;
-                    this.startVoiceRecognition(targetId, btn);
-                });
+                let recognition = null;
+                let isRecording = false;
+                
+                // マウスダウン/タッチスタートで録音開始
+                const startRecording = (e) => {
+                    e.preventDefault();
+                    if (isRecording) return;
+                    
+                    const targetId = btn.dataset.target;
+                    recognition = this.startVoiceRecognition(targetId, btn);
+                    if (recognition) {
+                        isRecording = true;
+                    }
+                };
+                
+                // マウスアップ/タッチエンドで録音停止
+                const stopRecording = (e) => {
+                    e.preventDefault();
+                    if (!isRecording || !recognition) return;
+                    
+                    recognition.stop();
+                    btn.classList.remove('recording');
+                    btn.disabled = false;
+                    isRecording = false;
+                    recognition = null;
+                };
+                
+                // マウスイベント
+                btn.addEventListener('mousedown', startRecording);
+                btn.addEventListener('mouseup', stopRecording);
+                btn.addEventListener('mouseleave', stopRecording); // マウスがボタンから離れた場合も停止
+                
+                // タッチイベント
+                btn.addEventListener('touchstart', startRecording);
+                btn.addEventListener('touchend', stopRecording);
+                btn.addEventListener('touchcancel', stopRecording); // タッチがキャンセルされた場合も停止
             });
         } else {
             // 音声認識が利用できない場合はボタンを非表示
@@ -466,7 +498,7 @@ class JiritsuLogApp {
         
         if (!SpeechRecognition) {
             alert('お使いのブラウザは音声認識をサポートしていません。');
-            return;
+            return null;
         }
 
         // マイクの許可と利用可能なデバイスの確認
@@ -562,8 +594,10 @@ class JiritsuLogApp {
                     errorMessage = 'マイクの使用が許可されていません。ブラウザの設定でマイクの使用を許可してください。';
                     break;
                 case 'no-speech':
-                    errorMessage = '音声が検出されませんでした。マイクに向かってはっきりと話してください。';
-                    break;
+                    // 音声が検出されない場合はエラーメッセージを表示しない（正常な場合）
+                    button.classList.remove('recording');
+                    button.disabled = false;
+                    return;
                 case 'network':
                     errorMessage = 'ネットワークエラーが発生しました。インターネット接続を確認してください。';
                     break;
@@ -571,8 +605,10 @@ class JiritsuLogApp {
                     errorMessage = 'マイクにアクセスできませんでした。\n\n・マイクが正しく接続されているか確認\n・他のアプリでマイクを使用していないか確認\n・ブラウザでマイクの使用が許可されているか確認';
                     break;
                 case 'aborted':
-                    errorMessage = '音声認識が中断されました。';
-                    break;
+                    // 手動停止の場合はエラーメッセージを表示しない
+                    button.classList.remove('recording');
+                    button.disabled = false;
+                    return;
                 case 'language-not-supported':
                     errorMessage = '選択された言語はサポートされていません。';
                     break;
@@ -580,6 +616,8 @@ class JiritsuLogApp {
                     errorMessage = `音声認識エラー: ${event.error}\n\nマイクの接続と設定を確認してください。`;
             }
             
+            button.classList.remove('recording');
+            button.disabled = false;
             alert(errorMessage);
         };
 
@@ -590,11 +628,13 @@ class JiritsuLogApp {
 
         try {
             recognition.start();
+            return recognition;
         } catch (error) {
             console.error('音声認識開始エラー:', error);
             alert('音声認識を開始できませんでした。ブラウザがサポートしていない可能性があります。');
             button.classList.remove('recording');
             button.disabled = false;
+            return null;
         }
     }
 
